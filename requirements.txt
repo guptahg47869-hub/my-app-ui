@@ -7,8 +7,11 @@ alembic
 httpx
 
 # Frontend
-nicegui
+nicegui>=1.4.17
 tzdata
 
 # Optional helpers
 python-dotenv
+
+# Ensure typing is clean (optional)
+types-python-dotenv
