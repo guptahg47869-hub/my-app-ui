@@ -1,7 +1,7 @@
 import os
 from nicegui import ui
 
-# import your pages
+# import all pages so they register
 import pages.trees
 import pages.post_flask
 import pages.home
@@ -12,5 +12,5 @@ import pages.quenching
 import pages.reports
 
 if __name__ in {"__main__", "__mp_main__"}:
-    port = int(os.getenv("PORT", 8080))  # Use Render-assigned PORT or default 8080
+    port = int(os.getenv("PORT", 8080))  # for Render compatibility
     ui.run(title='Casting Tracker', port=port, reload=False)
