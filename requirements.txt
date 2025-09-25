@@ -7,7 +7,7 @@ alembic
 httpx
 
 # Frontend
-nicegui>=1.4.17
+nicegui
 tzdata
 
 # Optional helpers
