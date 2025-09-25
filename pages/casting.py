@@ -4,7 +4,7 @@ import httpx, os, asyncio   # type: ignore
 from datetime import date, datetime
 from typing import Any, Dict, List
 
-API_URL = os.getenv('API_URL', 'http://localhost:8000')
+API_URL = os.getenv('API_URL', 'https://my-app-api-hgbk.onrender.com')
 print('UI using API_URL =', API_URL)
 
 # ---------- helpers ----------
@@ -272,3 +272,4 @@ async def casting_page(client: Client):
 
     # initial
     await asyncio.create_task(refresh_table())
+
