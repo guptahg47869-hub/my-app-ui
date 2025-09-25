@@ -14,4 +14,4 @@ import pages.reports
 app = ui.get_app()  # 👈 expose FastAPI app object
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(title='Casting Tracker', reload=True)
+    ui.run(title='Casting Tracker', reload=False)
