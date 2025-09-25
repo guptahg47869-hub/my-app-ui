@@ -12,6 +12,3 @@ tzdata
 
 # Optional helpers
 python-dotenv
-
-# Ensure typing is clean (optional)
-types-python-dotenv
