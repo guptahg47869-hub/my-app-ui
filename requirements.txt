@@ -1,0 +1,14 @@
+# Backend
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+alembic
+httpx
+
+# Frontend
+nicegui
+tzdata
+
+# Optional helpers
+python-dotenv
