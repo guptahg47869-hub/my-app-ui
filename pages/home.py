@@ -24,4 +24,4 @@ def landing():
         stage_card('Casting', 'Review temperature and push to Quenching.', '/casting')
         stage_card('Quenching', 'Track ready times & countdowns.', '/quenching')
         stage_card('Cutting', 'Record casting weights, scrap & loss.', '/cutting')
-        stage_card('Reports', 'Loss, throughput, scrap usage.', '/reports')
+        stage_card('Reports TEst', 'Loss, throughput, scrap usage.', '/reports')
