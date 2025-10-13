@@ -6,6 +6,8 @@ import httpx
 import os
 from typing import List, Dict, Any
 
+# print(">>> WAXING PAGE VERSION: with gasket/total columns <<<")
+
 # ---------- helpers ----------
 def to_ui(d_iso: str) -> str:
     """YYYY-MM-DD -> MM-DD-YY"""
@@ -34,20 +36,28 @@ def explain_http_error(exc: Exception) -> str:
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
-# ---------- API calls (no direct UI here) ----------
-async def fetch_metals() -> List[Dict[str, Any]]:
+# ---------- API calls ----------
+async def fetch_transit() -> List[Dict[str, Any]]:
     async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.get(f"{API_URL}/metals")
+        r = await client.get(f"{API_URL}/queue/transit")
         r.raise_for_status()
-        return r.json()
+        rows = r.json()
+        # normalize numeric types for UI
+        for row in rows:
+            for k in ('gasket_weight', 'total_weight', 'tree_weight', 'est_metal_weight'):
+                if row.get(k) is not None:
+                    try:
+                        row[k] = float(row[k])
+                    except Exception:
+                        pass
+        return rows
 
-async def post_waxing(payload: Dict[str, Any]) -> Dict[str, Any]:
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        r = await client.post(f"{API_URL}/waxing", json=payload)
+async def post_to_supply(payload: Dict[str, Any]) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.post(f"{API_URL}/waxing/post_to_supply", json=payload)
         try:
             r.raise_for_status()
         except httpx.HTTPStatusError as e:
-            # surface FastAPI's detail message
             raise RuntimeError(explain_http_error(e)) from e
         return r.json()
 
@@ -59,18 +69,18 @@ async def fetch_supply_queue(flask_no_filter: str = "") -> List[Dict[str, Any]]:
         return r.json()
 
 # ---------- preview helper ----------
-def metal_weight_preview(gasket: float, tree: float, _metal_name: str) -> float:
+def tree_weight_preview(gasket: float, total: float) -> float:
     try:
         g = float(gasket or 0)
-        t = float(tree or 0)
+        t = float(total or 0)
     except Exception:
         return 0.0
-    return round(t - g, 1)
+    return round(max(0.0, t - g), 3)
 
 # ---------- Waxing Page ----------
 @ui.page('/waxing')
 async def waxing_page(client: Client):
-    # Safe notifier — ALWAYS wrap UI ops in the client context:
+    # notifier
     def notify(msg: str, color: str = 'primary'):
         with client:
             ui.notify(msg, color=color)
@@ -87,162 +97,130 @@ async def waxing_page(client: Client):
 
     # Header
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
-        ui.label('Waxing').classes('text-lg font-semibold')
+        ui.label('Post Flask to Supply').classes('text-lg font-semibold')
         with ui.row().classes('items-center gap-2'):
-            ui.button('Home', on_click=lambda: ui.navigate.to('/')).props('flat').classes('text-white')
+            ui.button('CREATE TREE', on_click=lambda: ui.navigate.to('/trees')).props('flat').classes('text-white')
+            ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
 
-    # Load metals for the form
+    # Preload transit for selection
     try:
-        metals = await fetch_metals()
+        transit_rows = await fetch_transit()
     except Exception as e:
-        notify(f"Failed to fetch metals: {e}", color='negative')
-        metals = []
+        notify(f"Failed to fetch transit: {e}", color='negative')
+        transit_rows = []
 
-    metal_names = sorted([m.get('name') for m in metals if 'name' in m])
-    metal_name_to_id = {m['name']: m['id'] for m in metals if 'name' in m and 'id' in m}
-
-    # Layout: form left, queue right
+    # Layout
     with ui.splitter(value=50).classes('px-6').style('width: 100%; height: calc(100vh - 160px);') as splitter:
 
-        # LEFT FORM
+        # LEFT: Transit table
         with splitter.before:
-            with ui.card().classes('w-full h-full p-4'):
-                ui.label('Create New').classes('text-base font-semibold mb-2')
+            ui.label('Transit Queue').classes('text-base font-semibold mb-2')
+            columns = [
+                {'name': 'date', 'label': 'Date', 'field': 'date'},
+                {'name': 'tree_no', 'label': 'Tree No', 'field': 'tree_no'},
+                {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
+                # IMPORTANT: include these so they're present in the selected row dict
+                {'name': 'gasket_weight', 'label': 'Gasket', 'field': 'gasket_weight'},
+                {'name': 'total_weight', 'label': 'Total', 'field': 'total_weight'},
+                {'name': 'tree_weight', 'label': 'Tree Wt', 'field': 'tree_weight'},
+                {'name': 'est_metal_weight', 'label': 'Est. Metal', 'field': 'est_metal_weight'},
+            ]
+            tree_table = ui.table(columns=columns, rows=transit_rows, row_key='tree_id', selection='single') \
+                          .props('dense flat bordered hide-bottom') \
+                          .classes('w-full text-sm h-[420px]')
 
-                today_iso = date.today().isoformat()
-                date_input = ui.input('Date', value=today_iso).props('type=date').classes('w-full')
-                flask_no = ui.input('Flask No').props('clearable').classes('w-full')
-                metal_select = ui.select(options=metal_names, label='Metal').classes('w-full')
-                metal_select.props('options-dense behavior=menu popup-content-style="z-index:4000"')
+            async def refresh_transit():
+                try:
+                    rows = await fetch_transit()
+                except Exception as e:
+                    notify(f'Failed to fetch transit: {e}', 'negative'); rows = []
+                tree_table.rows = rows
+                tree_table.update()
 
-                gasket_weight = ui.number('Gasket Weight').classes('w-full')
-                tree_weight = ui.number('Total Tree Weight').classes('w-full')
-                preview = ui.label('Tree Weight Preview: 0.0').classes('text-gray-600')
+            ui.button('REFRESH', on_click=lambda: asyncio.create_task(refresh_transit())).props('outline').classes('mt-2')
 
-                def on_change():
-                    name = metal_select.value or ''
-                    gasket = gasket_weight.value or 0
-                    tree = tree_weight.value or 0
-                    # pure UI update; already in slot context
-                    preview.text = f"Tree Weight Preview: {metal_weight_preview(gasket, tree, name):.1f}"
-                for c in (metal_select, gasket_weight, tree_weight):
-                    c.on('change', lambda _e: on_change())
-
-                async def submit():
-                    if not flask_no.value:
-                        notify('Please enter a flask number', color='negative'); return
-                    if not metal_select.value:
-                        notify('Please select a metal', color='negative'); return
-                    m_id = metal_name_to_id.get(metal_select.value)
-                    if not m_id:
-                        notify('Unknown metal. Reload metals?', color='negative'); return
-
-                    payload = {
-                        "date": (date_input.value or today_iso),
-                        "flask_no": (flask_no.value or '').strip(),
-                        "metal_id": m_id,
-                        "gasket_weight": float(gasket_weight.value or 0),
-                        "tree_weight": float(tree_weight.value or 0),
-                        "posted_by": "waxing_ui",
-                    }
-                    try:
-                        resp = await post_waxing(payload)
-                        notify(f"Posted flask {resp.get('flask_id')} (Metal Weight = {resp.get('metal_weight')})", color='positive')
-                        # reset fields
-                        date_input.value = today_iso
-                        flask_no.value = ''
-                        metal_select.value = None
-                        gasket_weight.value = None
-                        tree_weight.value = None
-                        preview.text = 'Tree Weight Preview: 0.0'
-                        # refresh right panel
-                        await refresh_supply()
-                    except Exception as e:
-                        notify(str(e), color='negative')
-
-                # Use asyncio.create_task to preserve UI context during the async call
-                ui.button('Post to Metal Supply', on_click=lambda: asyncio.create_task(submit())) \
-                  .classes('bg-emerald-600 text-white mt-1')
-
-        # RIGHT QUEUE + DATE FILTERS
+        # RIGHT: Flask form
         with splitter.after:
-            with ui.card().classes('w-full h-full p-4'):
-                ui.label('Metal Supply Queue').classes('text-base font-semibold mb-2')
+            ui.label('Post Flask to Supply').classes('text-base font-semibold mb-2')
 
-                today_iso_right = date.today().isoformat()
+            # selected tree state
+            selected = {'tree_id': None, 'metal_name': None}
 
-                with ui.row().classes('items-end gap-3 w-full mb-2'):
-                    search_in = ui.input('Search by Flask No').props('clearable').classes('w-48')
-                    date_from = ui.input('From', value=today_iso_right).props('type=date').classes('w-36')
-                    date_to   = ui.input('To',   value=today_iso_right).props('type=date').classes('w-36')
+            today_iso = date.today().isoformat()
+            flask_date = ui.input('Flask Date', value=today_iso).props('type=date').classes('w-full')
+            flask_no = ui.input('Flask No').props('clearable').classes('w-full')
 
-                    async def reset_filters():
-                        search_in.value = ''
-                        date_from.value = today_iso_right
-                        date_to.value   = today_iso_right
-                        await refresh_supply()
-                        notify('Filters reset', color='positive')
+            gasket_weight = ui.number('Gasket Weight', value=0.0).classes('w-full')
+            total_weight  = ui.number('Total Weight',  value=0.0).classes('w-full')
 
-                    ui.button('Reset Filters', on_click=lambda: asyncio.create_task(reset_filters())).props('outline')
+            tw_preview    = ui.label('Tree Weight (Total – Gasket): 0.000').classes('text-gray-600')
+            metal_preview = ui.label('Final Metal (preview): 0.000').classes('text-gray-600')
 
-                columns = [
-                    {'name': 'date', 'label': 'Date', 'field': 'date'},
-                    {'name': 'flask_no', 'label': 'Flask No', 'field': 'flask_no'},
-                    {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
-                    {'name': 'metal_weight', 'label': 'Metal Weight', 'field': 'metal_weight'},
-                    {'name': 'status', 'label': 'Stage', 'field': 'status'},
-                ]
-                table = ui.table(columns=columns, rows=[]).props('dense flat bordered').classes('w-full text-sm')
+            def recalc_preview():
+                tw = tree_weight_preview(gasket_weight.value or 0, total_weight.value or 0)
+                tw_preview.text = f'Tree Weight (Total – Gasket): {tw:.1f}'
+                # Keep preview simple; server computes exact final on POST.
+                metal_preview.text = f'Final Metal (preview): {0.0:.3f}'
 
-                async def refresh_supply():
-                    try:
-                        rows = await fetch_supply_queue(flask_no_filter=search_in.value.strip())
-                    except Exception as e:
-                        notify(f'Failed to fetch supply queue: {e}', color='warning')
-                        rows = []
+            gasket_weight.on('change', lambda _: recalc_preview())
+            total_weight.on('change',  lambda _: recalc_preview())
 
-                    f_date = parse_iso_date(date_from.value)
-                    t_date = parse_iso_date(date_to.value)
+            # --- On row selection: autofill gasket/total (now present in row because of table columns) ---
+            def on_select(_e):
+                rows = tree_table.selected
+                if not rows:
+                    selected['tree_id'] = None
+                    selected['metal_name'] = None
+                    gasket_weight.value = 0.0
+                    total_weight.value = 0.0
+                    recalc_preview()
+                    return
 
-                    pruned = []
-                    for r in rows:
-                        d = parse_iso_date(r.get('date', '') or '')
-                        if not d:
-                            continue
-                        if f_date and d < f_date:
-                            continue
-                        if t_date and d > t_date:
-                            continue
-                        pruned.append(r)
+                row = rows[0]
+                selected['tree_id'] = row.get('tree_id')
+                selected['metal_name'] = row.get('metal_name')
 
-                    STATUS_DISPLAY = {
-                        'waxing': 'Waxing',
-                        'supply': 'Metal Supply',
-                        'casting': 'Casting',
-                        'quenching': 'Quenching',
-                        'cutting': 'Cutting',
-                        'done': 'Done',
-                    }
-                    for r in pruned:
-                        r['date'] = to_ui(r.get('date', ''))
-                        if r.get('status'):
-                            r['status'] = STATUS_DISPLAY.get(r['status'], r['status'])
-                        if r.get('metal_weight') is not None:
-                            try:
-                                r['metal_weight'] = float(r['metal_weight'])
-                            except Exception:
-                                pass
+                ui.notify(f"row keys: {list(row.keys())}", color='secondary')
 
-                    # ENTER UI CONTEXT to update components
-                    with client:
-                        table.rows = pruned
-                        table.update()
+                g = row.get('gasket_weight')
+                t = row.get('total_weight')
+                tw = float(row.get('tree_weight') or 0.0)
 
-                # trigger refresh on filter changes (keep UI context)
-                search_in.on('change', lambda _e: asyncio.create_task(refresh_supply()))
-                date_from.on('change', lambda _e: asyncio.create_task(refresh_supply()))
-                date_to.on('change',   lambda _e: asyncio.create_task(refresh_supply()))
+                # Fallback only if both missing (older trees)
+                if g is None and t is None:
+                    g = 0.0
+                    t = tw
 
-                # auto-refresh + initial load (keep UI context)
-                ui.timer(4.0, lambda: asyncio.create_task(refresh_supply()))
-                await refresh_supply()
+                gasket_weight.value = float(g or 0.0)
+                total_weight.value  = float(t or 0.0)
+                recalc_preview()
+
+            tree_table.on('selection', on_select)
+
+            async def submit():
+                if not selected['tree_id']:
+                    notify('Select a tree from Transit first', color='negative'); return
+                if not flask_no.value:
+                    notify('Enter a Flask No', color='negative'); return
+
+                payload = {
+                    "date": (flask_date.value or today_iso),
+                    "flask_no": (flask_no.value or '').strip(),
+                    "tree_id": int(selected['tree_id']),
+                    "gasket_weight": float(gasket_weight.value or 0),
+                    "total_weight": float(total_weight.value or 0),
+                    "posted_by": "waxing_ui",
+                }
+                try:
+                    resp = await post_to_supply(payload)
+                    notify(f"Flask {resp.get('flask_id')} → Supply (Metal {resp.get('metal_weight')})", color='positive')
+                    # reset flask no; keep selection
+                    flask_no.value = ''
+                    await refresh_transit()   # selected tree should leave transit
+                except Exception as e:
+                    notify(str(e), color='negative')
+
+            with ui.row().classes('gap-2 mt-2'):
+                ui.button('RECALCULATE', on_click=recalc_preview).props('outline')
+                ui.button('POST TO SUPPLY', on_click=lambda: asyncio.create_task(submit())) \
+                  .classes('bg-primary text-white')

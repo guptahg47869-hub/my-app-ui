@@ -1,5 +1,5 @@
-from nicegui import ui, Client # type: ignore
-import httpx, os, asyncio # type: ignore
+from nicegui import ui, Client  # type: ignore
+import httpx, os, asyncio  # type: ignore
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -33,7 +33,7 @@ def parse_iso_dt_utc(s: Optional[str]) -> Optional[datetime]:
         return dt
     except Exception:
         return None
-    
+
 # ---------- helpers ----------
 def to_ui_date(iso: str) -> str:
     try:
@@ -55,6 +55,9 @@ def explain_http_error(e: httpx.HTTPStatusError) -> str:
         return str(data)
     except Exception:
         return e.response.text or str(e)
+    
+
+
 
 # ---------- API calls ----------
 async def fetch_metals() -> List[Dict[str, Any]]:
@@ -64,11 +67,12 @@ async def fetch_metals() -> List[Dict[str, Any]]:
         return r.json()
 
 async def fetch_quenching_queue(flask_no: str | None = None) -> List[Dict[str, Any]]:
-    params = {}
-    if flask_no:
-        params['flask_no'] = flask_no
+    # params = {}
+    # if flask_no:
+    #     params['flask_no'] = flask_no
     async with httpx.AsyncClient(timeout=15.0) as c:
-        r = await c.get(f'{API_URL}/queue/quenching', params=params or None)  # includes minutes_left, ready_at
+        # r = await c.get(f'{API_URL}/queue/quenching', params=params or None)  # includes minutes_left, ready_at
+        r = await c.get(f'{API_URL}/queue/quenching')  # includes minutes_left, ready_at
         r.raise_for_status()
         return r.json()
 
@@ -99,7 +103,7 @@ async def quenching_page(client: Client):
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
         ui.label('Quenching Queue').classes('text-lg font-semibold')
         with ui.row().classes('items-center gap-2'):
-            ui.button('Home', on_click=lambda: ui.navigate.to('/')).props('flat').classes('text-white')
+            ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
 
     # preload metals for filter
     try:
@@ -121,14 +125,14 @@ async def quenching_page(client: Client):
 
                     with ui.row().classes('items-end gap-3 p-4').style('flex:0 0 auto;'):
                         ui.label('Flasks in Quenching').classes('text-base font-semibold mr-4')
-                        f_search = ui.input('Search by Flask No').props('clearable').classes('w-48')
-                        d_from = ui.input('From', value=today_iso).props('type=date').classes('w-36')
-                        d_to   = ui.input('To',   value=today_iso).props('type=date').classes('w-36')
+                        f_search = ui.input('Search by Flask or Tree').props('clearable').classes('w-48')
+                        d_from = ui.input('From').props('type=date').classes('w-36')
+                        d_to   = ui.input('To').props('type=date').classes('w-36')
                         metal_filter = ui.select(options=metal_options, value='All', label='Metal').classes('w-48')
                         metal_filter.props('options-dense behavior=menu popup-content-style="z-index:4000"')
 
                         async def reset_filters():
-                            d_from.value = today_iso; d_to.value = today_iso
+                            d_from.value = ''; d_to.value = ''
                             f_search.value = ''; metal_filter.value = 'All'
                             await refresh_table()
                             notify('Filters reset.', 'positive')
@@ -142,9 +146,9 @@ async def quenching_page(client: Client):
                         columns = [
                             {'name': 'date', 'label': 'Date', 'field': 'date'},
                             {'name': 'flask_no', 'label': 'Flask No', 'field': 'flask_no'},
+                            {'name': 'tree_no',  'label': 'Tree No',  'field': 'tree_no'},
                             {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
                             {'name': 'metal_weight', 'label': 'Req. Metal', 'field': 'metal_weight'},
-                            # NEW COLUMN (EST HH:MM)
                             {'name': 'ready_at_est', 'label': 'Ready At', 'field': 'ready_at_est'},
                             {'name': 'time_left', 'label': 'Time Left', 'field': 'time_left_display'},
                         ]
@@ -171,35 +175,66 @@ async def quenching_page(client: Client):
 
                 ui.separator().classes('my-4 w-full')
 
-                with ui.card().classes('w-full flex flex-col items-center p-6'):
-                    ui.label('Time Left (min)').classes('text-lg text-gray-500')
-                    left_lbl = ui.label('—').classes('text-7xl font-extrabold num-shadow')
+                # === NEW: two tiles in a row: Ready At (left) + Time Left (right) ===
+                with ui.grid(columns=2).classes('gap-6 w-full'):
+                    with ui.card().classes('w-full flex flex-col items-center p-6'):
+                        ui.label('Ready At (EST)').classes('text-lg text-gray-500')
+                        ready_tile_lbl = ui.label('—').classes('text-7xl font-extrabold num-shadow')
 
-                ready_lbl = ui.label('').classes('text-gray-600 mt-4 text-lg')
+                    with ui.card().classes('w-full flex flex-col items-center p-6'):
+                        ui.label('Time Left (min)').classes('text-lg text-gray-500')
+                        left_lbl = ui.label('—').classes('text-7xl font-extrabold num-shadow')
+
+                def _set_time_color(ml: int | None):
+                    # clear previous state
+                    left_lbl.classes(remove='text-warning')
+                    left_lbl.classes(remove='text-negative')
+                    # apply new
+                    if ml is None:
+                        return
+                    if ml == 0:
+                        left_lbl.classes(add='text-negative')   # red
+                    elif ml <= 2:
+                        left_lbl.classes(add='text-warning')    # yellow
+
 
                 async def sync_selection():
+                    """Refresh the right panel using the *latest* row data after table updates."""
                     nonlocal selected
                     row_list = quench_table.selected or []
-                    selected = row_list[0] if row_list else None
+                    if row_list:
+                        # Re-bind selection to the freshly-updated row with the same id
+                        sel_id = row_list[0].get('id')
+                        current = next((r for r in quench_table.rows if r.get('id') == sel_id), row_list[0])
+                        selected = current
+                    else:
+                        selected = None
+
                     with client:
                         if not selected:
                             flask_no_lbl.text = 'Flask: —'
                             metal_lbl.text = 'Metal: —'
                             left_lbl.text = '—'
-                            ready_lbl.text = ''
+                            ready_tile_lbl.text = '—'
+                            _set_time_color(None)
+
                         else:
                             flask_no_lbl.text = f"Flask: {selected.get('flask_no','—')}"
                             mname = selected.get('metal_name','—')
                             metal_lbl.text = f"Metal: {mname}"
+
                             ml = int(selected.get('minutes_left', 0) or 0)
                             left_lbl.text = 'DONE' if ml == 0 else f'{ml}'
-                            # show ready_at in EST HH:MM
-                            ra = selected.get('ready_at', '')
-                            if ra:
-                                dt_utc = parse_iso_dt_utc(ra)
-                                ready_lbl.text = f"Ready at: {to_est_hm(dt_utc)}"
+                            _set_time_color(ml)
+
+                            # prefer precomputed 'ready_at_est'; fall back to raw 'ready_at'
+                            ra_est = (selected.get('ready_at_est') or '').strip()
+                            if ra_est:
+                                ready_tile_lbl.text = ra_est
                             else:
-                                ready_lbl.text = ''
+                                ra_raw = selected.get('ready_at', '')
+                                dt_utc = parse_iso_dt_utc(ra_raw) if ra_raw else None
+                                ready_tile_lbl.text = to_est_hm(dt_utc) if dt_utc else '—'
 
                 quench_table.on('selection', lambda _e: asyncio.create_task(sync_selection()))
 
@@ -244,9 +279,14 @@ async def quenching_page(client: Client):
             # metal filter
             if pick != 'All' and (r.get('metal_name') != pick):
                 continue
-            # search by flask no
-            if needle and needle not in str(r.get('flask_no','')).lower():
+
+            # search by flask or tree no
+            hay = f"{r.get('flask_no','')} {r.get('tree_no','')}".lower()
+            if needle and needle not in hay:
                 continue
+
+            # if needle and needle not in str(r.get('flask_no','')).lower():
+            #     continue
 
             # compute time left and 'Ready At (EST)'
             ml = r.get('minutes_left')
@@ -279,14 +319,30 @@ async def quenching_page(client: Client):
         return out
 
     async def refresh_table():
+        """Refresh table rows; keep the same selection (by id) and update right panel."""
         try:
-            raw = await fetch_quenching_queue(flask_no=(f_search.value or '').strip() or None)
+            # raw = await fetch_quenching_queue(flask_no=(f_search.value or '').strip() or None)
+            raw = await fetch_quenching_queue()
         except Exception as e:
             notify(f'Failed to fetch quenching queue: {e}', 'negative')
             raw = []
+
         rows = _apply_filters(raw)
+
+        # --- preserve current selection by id and re-select in new rows ---
+        selected_id = None
+        try:
+            if quench_table.selected:
+                selected_id = quench_table.selected[0].get('id')
+        except Exception:
+            selected_id = None
+
         quench_table.rows = rows
+        if selected_id is not None:
+            re_row = next((r for r in rows if r.get('id') == selected_id), None)
+            quench_table.selected = [re_row] if re_row else []
         quench_table.update()
+
         await sync_selection()
 
     # events

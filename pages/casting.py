@@ -1,7 +1,7 @@
 # jewelry-casting-ui/pages/casting.py
 from nicegui import ui, Client # type: ignore
 import httpx, os, asyncio   # type: ignore
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List
 
 API_URL = os.getenv('API_URL', 'https://my-app-api-hgbk.onrender.com')
@@ -37,25 +37,25 @@ def casting_temp_for(metal_name: str) -> float:
     elif "14W" in n: temp = 1050
     elif "14Y" in n: temp = 1030
     elif "14R" in n: temp = 1100
-    elif "SILVER" in n: temp = 980
+    elif "SILVER" in n: temp = 1000
     elif "18W" in n: temp = 1050
     elif "18Y" in n: temp = 1060
     elif "18R" in n: temp = 1100
-    elif "PLATINUM" in n: temp = 1000
+    elif "PLATINUM" in n: temp = 1900
     return float(temp)
 
 def oven_temp_for(metal_name: str) -> float:
     n = (metal_name or '').upper()
     temp = 1000
     if "10" in n: temp = 1100
-    elif "14W" in n: temp = 1150
+    elif "14W" in n: temp = 1050
     elif "14Y" in n: temp = 1050
     elif "14R" in n: temp = 1050
-    elif "SILVER" in n: temp = 980
+    elif "SILVER" in n: temp = 1020
     elif "18W" in n: temp = 1050
     elif "18Y" in n: temp = 1050
     elif "18R" in n: temp = 1020
-    elif "PLATINUM" in n: temp = 1000
+    elif "PLATINUM" in n: temp = 1400
     return float(temp)
 
 # ---------- API ----------
@@ -66,11 +66,12 @@ async def fetch_metals() -> List[Dict[str, Any]]:
         return r.json()
 
 async def fetch_casting_queue(flask_no: str | None = None) -> List[Dict[str, Any]]:
-    params = {}
-    if flask_no:
-        params['flask_no'] = flask_no
+    # params = {}
+    # if flask_no:
+    #     params['flask_no'] = flask_no
     async with httpx.AsyncClient(timeout=15.0) as c:
-        r = await c.get(f'{API_URL}/queue/casting', params=params or None)
+        # r = await c.get(f'{API_URL}/queue/casting', params=params or None)
+        r = await c.get(f'{API_URL}/queue/casting')
         r.raise_for_status()
         return r.json()
 
@@ -101,7 +102,7 @@ async def casting_page(client: Client):
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
         ui.label('Casting Queue').classes('text-lg font-semibold')
         with ui.row().classes('items-center gap-2'):
-            ui.button('Home', on_click=lambda: ui.navigate.to('/')).props('flat').classes('text-white')
+            ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
 
     # preload metals for filter
     try:
@@ -123,14 +124,14 @@ async def casting_page(client: Client):
 
                     with ui.row().classes('items-end gap-3 p-4').style('flex:0 0 auto;'):
                         ui.label('Flasks in Casting').classes('text-base font-semibold mr-4')
-                        f_search = ui.input('Search by Flask No').props('clearable').classes('w-48')
-                        d_from = ui.input('From', value=today_iso).props('type=date').classes('w-36')
-                        d_to   = ui.input('To',   value=today_iso).props('type=date').classes('w-36')
+                        f_search = ui.input('Search by Flask or Tree').props('clearable').classes('w-48')
+                        d_from = ui.input('From').props('type=date').classes('w-36')
+                        d_to   = ui.input('To').props('type=date').classes('w-36')
                         metal_filter = ui.select(options=metal_options, value='All', label='Metal').classes('w-48')
                         metal_filter.props('options-dense behavior=menu popup-content-style="z-index:4000"')
 
                         async def reset_filters():
-                            d_from.value = today_iso; d_to.value = today_iso
+                            d_from.value = ''; d_to.value = ''
                             f_search.value = ''; metal_filter.value = 'All'
                             await refresh_table()
                             notify('Filters reset.', 'positive')
@@ -143,12 +144,46 @@ async def casting_page(client: Client):
                         columns = [
                             {'name': 'date', 'label': 'Date', 'field': 'date'},
                             {'name': 'flask_no', 'label': 'Flask No', 'field': 'flask_no'},
+                            {'name': 'tree_no',  'label': 'Tree No',  'field': 'tree_no'},
                             {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
                             {'name': 'metal_weight', 'label': 'Req. Metal', 'field': 'metal_weight'},
                         ]
                         casting_table = ui.table(columns=columns, rows=[]) \
                                           .props('dense flat bordered row-key="id" selection="single" hide-bottom') \
                                           .classes('w-full text-sm')
+                        
+                        # make entire row red (text-negative) when props.row._is_old == True,
+                        # using the same slot pattern as quenching's colored "Time Left" cell
+                        casting_table.add_slot('body-cell-date', '''
+                        <q-td :props="props">
+                        <span :class="props.row._is_old ? 'text-negative' : ''">{{ props.row.date }}</span>
+                        </q-td>
+                        ''')
+
+                        casting_table.add_slot('body-cell-flask_no', '''
+                        <q-td :props="props">
+                        <span :class="props.row._is_old ? 'text-negative' : ''">{{ props.row.flask_no }}</span>
+                        </q-td>
+                        ''')
+
+                        casting_table.add_slot('body-cell-tree_no', '''
+                        <q-td :props="props">
+                        <span :class="props.row._is_old ? 'text-negative' : ''">{{ props.row.tree_no }}</span>
+                        </q-td>
+                        ''')
+
+                        casting_table.add_slot('body-cell-metal_name', '''
+                        <q-td :props="props">
+                        <span :class="props.row._is_old ? 'text-negative' : ''">{{ props.row.metal_name }}</span>
+                        </q-td>
+                        ''')
+
+                        casting_table.add_slot('body-cell-metal_weight', '''
+                        <q-td :props="props">
+                        <span :class="props.row._is_old ? 'text-negative' : ''">{{ props.row.metal_weight }}</span>
+                        </q-td>
+                        ''')
+
 
         # RIGHT: GIANT details + post button
         with main_split.after:
@@ -226,6 +261,9 @@ async def casting_page(client: Client):
         needle = (f_search.value or '').strip().lower()
 
         out: List[Dict[str, Any]] = []
+        # yesterday cutoff (anything earlier than yesterday should be red)
+        yday = date.today() - timedelta(days=1)
+
         for r in rows:
             d_iso = r.get('date') or ''
             d = parse_iso_date(d_iso)
@@ -237,17 +275,22 @@ async def casting_page(client: Client):
                 continue
             if pick != 'All' and (r.get('metal_name') != pick):
                 continue
-            if needle and needle not in str(r.get('flask_no','')).lower():
+
+            hay = f"{r.get('flask_no','')} {r.get('tree_no','')}".lower()
+            if needle and needle not in hay:
                 continue
 
             rr = dict(r)
-            rr['_sort_ord'] = -d.toordinal()                 # date DESC
-            rr['_sort_metal'] = rr.get('metal_name') or ''   # metal ASC
-            rr['_sort_flask'] = str(rr.get('flask_no',''))   # flask ASC
+            rr['_is_old'] = bool(d < yday)          # <-- used by the slots above
+            rr['_sort_ord'] = d.toordinal()         # <-- ASC (oldest first)
+            rr['_sort_metal'] = rr.get('metal_name') or ''
+            rr['_sort_flask'] = str(rr.get('flask_no',''))
             rr['_display_date'] = to_ui_date(d_iso)
             out.append(rr)
 
+        # ASC by date now (then metal, then flask)
         out.sort(key=lambda x: (x['_sort_ord'], x['_sort_metal'], x['_sort_flask']))
+
         for rr in out:
             rr['date'] = rr['_display_date']
             for k in ('_sort_ord','_sort_metal','_sort_flask','_display_date'):
@@ -256,7 +299,8 @@ async def casting_page(client: Client):
 
     async def refresh_table():
         try:
-            raw = await fetch_casting_queue(flask_no=(f_search.value or '').strip() or None)
+            # raw = await fetch_casting_queue(flask_no=(f_search.value or '').strip() or None)
+            raw = await fetch_casting_queue()
         except Exception as e:
             notify(f'Failed to fetch casting queue: {e}', 'negative')
             raw = []

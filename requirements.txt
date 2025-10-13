@@ -9,6 +9,7 @@ httpx
 # Frontend
 nicegui
 tzdata
+reportlab
 
 # Optional helpers
 python-dotenv
