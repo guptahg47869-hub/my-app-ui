@@ -413,6 +413,8 @@ async def metal_prep_page(client: Client):
                 r = await c.get(f'{API_URL}/queue/metal_prep', params=params)
                 r.raise_for_status()
                 rows = r.json()
+                for r in rows:
+                    r['date'] = mm_dd_yyyy(r.get('date'))
                 queue_table.rows = rows
                 queue_table.update()
         except httpx.HTTPStatusError as e:
