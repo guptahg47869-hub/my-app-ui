@@ -4,7 +4,7 @@ import httpx, os, asyncio   # type: ignore
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List
 
-API_URL = os.getenv('API_URL', 'https://my-app-api-hgbk.onrender.com')
+API_URL = os.getenv('API_URL', 'http://localhost:8000')
 print('UI using API_URL =', API_URL)
 
 # ---------- helpers ----------
