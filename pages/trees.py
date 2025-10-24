@@ -127,11 +127,11 @@ def est_metal_weight(tree_weight: float, metal_name: str) -> float:
 #     y -= (used + 3)
 
 #     # Metal
-#     used = fit_text("Helvetica", 7.5, f"Metal: {metal_name}", left_x, y - 7, left_w)
+#     used = fit_text("Helvetica-Bold", 7.5, f"Metal: {metal_name}", left_x, y - 7, left_w)
 #     y -= (used + 2)
 
 #     # Date
-#     used = fit_text("Helvetica", 7.5, f"Date:  {date_disp}", left_x, y - 7, left_w)
+#     used = fit_text("Helvetica-Bold", 7.5, f"Date:  {date_disp}", left_x, y - 7, left_w)
 #     y -= (used + 2)
 
 #     # Est. Metal
@@ -230,7 +230,7 @@ def _build_tree_label_pdf_bytes(
     def _fit_size(text: str, max_w: float, base: float, minsz: float) -> float:
         size = base
         while size >= minsz:
-            if pdfmetrics.stringWidth(text, "Helvetica", size) <= max_w:
+            if pdfmetrics.stringWidth(text, "Helvetica-Bold", size) <= max_w:
                 return size
             size -= 0.5
         return minsz
@@ -238,16 +238,16 @@ def _build_tree_label_pdf_bytes(
     def _draw_line(text: str, y: float, base: float, minsz: float):
         # try shrink first
         sz = _fit_size(text, text_w, base, minsz)
-        if pdfmetrics.stringWidth(text, "Helvetica", sz) <= text_w:
-            c.setFont("Helvetica", sz)
+        if pdfmetrics.stringWidth(text, "Helvetica-Bold", sz) <= text_w:
+            c.setFont("Helvetica-Bold", sz)
             c.drawString(text_x, y, text)
             return
 
         # ellipsize if still too long
         ell = "…"
-        while text and pdfmetrics.stringWidth(text + ell, "Helvetica", sz) > text_w:
+        while text and pdfmetrics.stringWidth(text + ell, "Helvetica-Bold", sz) > text_w:
             text = text[:-1]
-        c.setFont("Helvetica", sz)
+        c.setFont("Helvetica-Bold", sz)
         c.drawString(text_x, y, (text + ell) if text else ell)
 
     # Decide font sizes (slightly different bases for top/bottom)
@@ -591,3 +591,4 @@ async def create_tree_page(client: Client):
 
     # initial
     await asyncio.create_task(refresh_transit_table())
+
