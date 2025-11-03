@@ -65,108 +65,6 @@ def est_metal_weight(tree_weight: float, metal_name: str) -> float:
     elif 'SILVER' in name: factor = 11
     return round((tree_weight or 0.0) * factor, 3)
 
-# # ---------- PDF: 1" x 2" tree label ----------
-# def _build_tree_label_pdf_bytes(*, tree_no: str, metal_name: str, when_iso: str, est_metal: float) -> bytes:
-#     """
-#     Create a true 2in x 1in PDF label (landscape):
-#       - Left column: Tree No (bold), Metal, Date (MM-DD-YYYY), Est. Metal
-#       - Right column: auto-scaled Code128 barcode of tree_no
-#     Everything is sized to avoid overlap on small media.
-#     """
-#     try:
-#         from reportlab.pdfgen import canvas
-#         from reportlab.lib.units import inch, mm
-#         from reportlab.graphics.barcode import code128
-#         from reportlab.pdfbase import pdfmetrics
-#         from io import BytesIO
-#     except ImportError:
-#         raise RuntimeError("Missing dependency: reportlab. Install with: pip install reportlab")
-
-#     # Format date
-#     try:
-#         from datetime import datetime
-#         date_disp = datetime.strptime(when_iso, "%Y-%m-%d").strftime("%m-%d-%Y")
-#     except Exception:
-#         date_disp = when_iso
-
-#     # Page: 2" wide x 1" tall
-#     W, H = (2 * inch, 1 * inch)
-#     M = 2.5 * mm  # margin
-
-#     buf = BytesIO()
-#     c = canvas.Canvas(buf, pagesize=(W, H))
-
-#     # --- Layout: 2 columns ----------------------------------------------------
-#     left_x  = M
-#     left_w  = W * 0.60 - M  # ~60% for text
-#     right_x = W * 0.60
-#     right_w = W - right_x - M
-#     top_y   = H - M
-
-#     # Utility: draw a line of text that auto-shrinks to fit the left column
-#     def fit_text(font_name: str, base_size: float, text: str, x: float, y: float, max_w: float, min_size: float = 5.5):
-#         size = base_size
-#         while size >= min_size:
-#             width = pdfmetrics.stringWidth(text, font_name, size)
-#             if width <= max_w:
-#                 c.setFont(font_name, size)
-#                 c.drawString(x, y, text)
-#                 return size
-#             size -= 0.5
-#         # If still too long, truncate with ellipsis
-#         c.setFont(font_name, min_size)
-#         ell = '…'
-#         while pdfmetrics.stringWidth(text + ell, font_name, min_size) > max_w and len(text) > 1:
-#             text = text[:-1]
-#         c.drawString(x, y, text + ell)
-
-#     # --- Left column text (stacked, with tight leading) -----------------------
-#     y = top_y
-#     # Tree No (bold)
-#     used = fit_text("Helvetica-Bold", 10.0, f"{tree_no}", left_x, y - 9, left_w)
-#     y -= (used + 3)
-
-#     # Metal
-#     used = fit_text("Helvetica", 7.5, f"Metal: {metal_name}", left_x, y - 7, left_w)
-#     y -= (used + 2)
-
-#     # Date
-#     used = fit_text("Helvetica", 7.5, f"Date:  {date_disp}", left_x, y - 7, left_w)
-#     y -= (used + 2)
-
-#     # Est. Metal
-#     used = fit_text("Helvetica-Bold", 8.0, f"Est. Metal: {est_metal:.1f}", left_x, y - 8, left_w)
-#     y -= (used + 2)
-
-#     # --- Right column barcode -------------------------------------------------
-#     # Create with a conservative bar width; we'll scale to fit both width and height
-#     b = code128.Code128(tree_no, barHeight=10 * mm, barWidth=0.38)  # initial values before scaling
-
-#     # Available height for barcode is full height minus margins top/bottom
-#     avail_h = H - 2 * M
-#     avail_w = right_w
-
-#     # Compute scale factor to fit in right column (preserve aspect ratio)
-#     scale_x = avail_w / float(b.width)
-#     scale_y = avail_h / float(b.height)
-#     scale   = min(scale_x, scale_y, 1.0)  # never scale up beyond 1 (keeps bars crisp)
-
-#     # Center the barcode inside the right column
-#     bx = right_x + (avail_w - b.width * scale) / 2.0
-#     by = M + (avail_h - b.height * scale) / 2.0
-
-#     c.saveState()
-#     c.translate(bx, by)
-#     c.scale(scale, scale)
-#     b.drawOn(c, 0, 0)
-#     c.restoreState()
-
-#     c.showPage()
-#     c.save()
-#     pdf = buf.getvalue()
-#     buf.close()
-#     return pdf
-
 # ---------- PDF: 12" x 0.5" long strip tree label ----------
 def _build_tree_label_pdf_bytes(
     *,
@@ -174,15 +72,8 @@ def _build_tree_label_pdf_bytes(
     metal_name: str,
     when_iso: str,
     est_metal: float,
-    bag_nos: list[str] | None = None,    # <-- NEW
+    bag_nos: list[str] | None = None,    # <-- includes Bags line
 ) -> bytes:
-    """
-    Create a horizontal strip PDF (your current 6in x 0.5in):
-      LEFT: 2 lines of text
-            Line 1: "  {MM-DD}  | {TREE_NO}  |  Metal: {metal}  |  Est: {grams}g"
-            Line 2: "Bags: {bag1, bag2, ...}" (shrinks or ellipsizes to fit)
-      RIGHT: Code128 barcode (tree_no), auto-scaled
-    """
     try:
         from reportlab.pdfgen import canvas
         from reportlab.lib.units import inch, mm
@@ -193,93 +84,71 @@ def _build_tree_label_pdf_bytes(
     except ImportError:
         raise RuntimeError("Missing dependency: reportlab. Install with: pip install reportlab")
 
-    # Format date (MM-DD) to match your current code
     try:
         date_disp = datetime.strptime(when_iso, "%Y-%m-%d").strftime("%m-%d")
     except Exception:
         date_disp = when_iso
 
-    # Page: using your current 6" x 0.5"
     W, H = (4 * inch, 0.5 * inch)
-    M = 0.5 * mm          # margin
-    GAP = 1 * mm          # gap between text and barcode block
-    BAR_W_FRACTION = 0.33 # ~1/3 width reserved for barcode
+    M = 0.5 * mm
+    GAP = 1 * mm
+    BAR_W_FRACTION = 0.33
 
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=(W, H))
     c.setLineWidth(0.6)
     c.rect(1, 1, W-2, H-2)
 
-    # Compose the top info line (kept exactly as you wrote it)
     info = f"  {date_disp}  | {tree_no}  |  Metal: {metal_name}  |  Est: {est_metal:.1f}g"
-
-    # Build the bags line
     bags_line = None
     if bag_nos:
         bags_line = "  Bags: " + ", ".join(bag_nos)
 
-    # Layout: text block (left), barcode block (right)
     bar_w = max(W * BAR_W_FRACTION, 1.5 * inch)
     text_x = M
     text_w = W - (M + GAP + bar_w + M)
-    # two-line layout with modest padding top/bottom
     top_pad = 0.8 * mm
     bottom_pad = 0.7 * mm
 
-    # Helpers: fit, then (if still too long) ellipsize to width
     def _fit_size(text: str, max_w: float, base: float, minsz: float) -> float:
         size = base
         while size >= minsz:
-            if pdfmetrics.stringWidth(text, "Helvetica", size) <= max_w:
+            if pdfmetrics.stringWidth(text, "Helvetica-Bold", size) <= max_w:
                 return size
             size -= 0.5
         return minsz
 
     def _draw_line(text: str, y: float, base: float, minsz: float):
-        # try shrink first
         sz = _fit_size(text, text_w, base, minsz)
-        if pdfmetrics.stringWidth(text, "Helvetica", sz) <= text_w:
-            c.setFont("Helvetica", sz)
+        if pdfmetrics.stringWidth(text, "Helvetica-Bold", sz) <= text_w:
+            c.setFont("Helvetica-Bold", sz)
             c.drawString(text_x, y, text)
             return
-
-        # ellipsize if still too long
         ell = "…"
-        while text and pdfmetrics.stringWidth(text + ell, "Helvetica", sz) > text_w:
+        while text and pdfmetrics.stringWidth(text + ell, "Helvetica-Bold", sz) > text_w:
             text = text[:-1]
-        c.setFont("Helvetica", sz)
+        c.setFont("Helvetica-Bold", sz)
         c.drawString(text_x, y, (text + ell) if text else ell)
 
-    # Decide font sizes (slightly different bases for top/bottom)
     top_base, top_min = 10.0, 5.0
     bot_base, bot_min = 9.0, 5.0
 
-    # Compute y positions: top line near top, bottom line near bottom
-    # baselines, not centers (reportlab uses baseline y)
     top_y = H - M - top_pad - top_base * 0.9
     bot_y = M + bottom_pad
 
-    # Draw top info line
     _draw_line(info, top_y, top_base, top_min)
-
-    # Draw bag numbers if provided
     if bags_line:
         _draw_line(bags_line, bot_y, bot_base, bot_min)
 
-    # Barcode block (right)
     bar_x = W - M - bar_w
     avail_h = H - 2 * M
     avail_w = bar_w
 
-    # Your current barcode settings (kept unchanged)
     b = code128.Code128(tree_no, barHeight=avail_h, barWidth=1)
-
-    # Uniform scaling so it fits
     scale_x = avail_w / float(b.width)
     scale_y = avail_h / float(b.height)
     scale = min(scale_x, scale_y, 1.0)
 
-    # Center barcode in its block
     bx = bar_x + (avail_w - b.width * scale) / 2.0
     by = M + (avail_h - b.height * scale) / 2.0
 
@@ -304,11 +173,206 @@ async def create_tree_page(client: Client):
     ui.page_title('Create Tree · Casting Tracker')
     ui.add_head_html('<style>.fill-parent{width:100%!important;max-width:100%!important}</style>')
 
+    ui.add_head_html("""
+    <style>
+    /* --- Minimal uploader style --- */
+    .q-uploader {
+    background: #f2f2f2;              /* light gray */
+    border: none !important;
+    border-radius: 10px !important;   /* smooth rounded corners */
+    color: #111 !important;           /* make all text black */
+    }
+
+    /* force rounded corners on inner content so gray background matches */
+    .q-uploader__content,
+    .q-uploader__list {
+    border-radius: 10px !important;
+    color: #111 !important;
+    }
+
+    /* tweak header + plus button */
+    .q-uploader__header {
+    background: transparent !important;
+    color: #111 !important;
+    border-bottom: none !important;
+    padding: 6px !important;
+    }
+
+    .q-uploader__header .q-btn,
+    .q-uploader__header .q-btn__content {
+    color: #111 !important;
+    }
+
+    /* make percentage text and file names black */
+    .q-uploader__file,
+    .q-uploader__file--header,
+    .q-uploader__title,
+    .q-uploader__subtitle,
+    .q-uploader__progress {
+    color: #111 !important;
+    }
+    </style>
+    """)
+
+    ui.add_head_html("""
+    <style>
+    /* Remove the built-in checkmarks */
+    .q-uploader__file-status,
+    .q-uploader__header-icon,
+    .q-icon.q-uploader__file-status,
+    .q-uploader__file-header .q-icon {
+    display: none !important;
+    }
+    </style>
+    """)
+
+    ui.add_head_html("""
+    <style>
+    /* Hide all selection/checkbox UI in QUploader */
+    .q-uploader__header .q-checkbox,
+    .q-uploader__header .q-checkbox * { display:none !important; }
+
+    /* Per-file side section (the checkmark/circle lives here) */
+    .q-uploader__file .q-item__section--side { 
+    display:none !important; 
+    width:0 !important; 
+    padding:0 !important; 
+    margin:0 !important; 
+    }
+
+    /* Any leftover status icons */
+    .q-uploader__file-status,
+    .q-uploader__header-icon,
+    .q-uploader__file-header .q-icon,
+    .q-icon.q-uploader__file-status {
+    display:none !important;
+    }
+
+    /* Remove ripple/focus visuals that could look like a circle */
+    .q-focus-helper, .q-ripple, .q-ripple__inner { display:none !important; }
+    </style>
+    """)
+
+    ui.add_head_html("""
+    <style>
+    /* Hide ONLY the top-left checkmark icon in QUploader header, keep the + intact */
+
+    /* target the icon element with a checkmark (usually has .q-icon--success or check SVG path) */
+    .q-uploader__header .q-icon.q-icon--success,
+    .q-uploader__header .q-icon.text-positive,
+    .q-uploader__header .q-uploader__header-icon.q-icon--success {
+    display: none !important;
+    }
+
+    /* reset any unintended hiding from previous rule */
+    .q-uploader__header .q-btn,
+    .q-uploader__header .q-btn__content,
+    .q-uploader__header .q-icon:not(.q-icon--success) {
+    display: inline-flex !important;
+    pointer-events: auto !important;
+    opacity: 1 !important;
+    }
+    </style>
+    """)
+
+    ui.add_head_html("""
+    <style>
+    /* Disable all pointer interactions inside the uploaded file list */
+    .q-uploader__list,
+    .q-uploader__file .q-item,
+    .q-uploader__file .q-item__section {
+    pointer-events: none !important;
+    user-select: none !important;
+    }
+
+    /* Ensure header (+) stays clickable */
+    .q-uploader__header, .q-uploader__header * {
+    pointer-events: auto !important;
+    }
+
+    /* If selection somehow happens via keyboard, keep text visible */
+    .q-uploader__file--selected .q-uploader__title,
+    .q-uploader__file--selected .q-uploader__subtitle {
+    opacity: 1 !important;
+    }
+    </style>
+    """)
+
+    ui.add_head_html("""
+    <style>
+    /* --- FINAL fix: disable click and hide the top-left checkmark in QUploader header --- */
+
+    /* 1️⃣ Hide the icon element itself */
+    .q-uploader__header .q-icon.q-icon--success,
+    .q-uploader__header .q-icon.text-positive {
+    opacity: 0 !important;          /* invisible */
+    pointer-events: none !important;/* not clickable */
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    }
+
+    /* 2️⃣ Remove any hover or click on that header section */
+    .q-uploader__header .q-item__section--side,
+    .q-uploader__header .q-item__section--avatar {
+    pointer-events: none !important;
+    }
+
+    /* 3️⃣ Keep the + add button visible and active */
+    .q-uploader__header .q-btn,
+    .q-uploader__header .q-btn__content,
+    .q-uploader__header .q-icon:not(.q-icon--success):not(.text-positive) {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    display: inline-flex !important;
+    }
+    </style>
+    """)
+
+    ui.add_head_html("""
+    <style>
+    /* Remove the whole left cluster in the QUploader header (icon + text) */
+    .q-uploader__header .q-item__section--main,
+    .q-uploader__header .q-item__section--avatar,
+    .q-uploader__header .q-item__section--side:first-child {
+    display: none !important;
+    width: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    }
+
+    /* Keep the right-side buttons (the +) visible and clickable */
+    .q-uploader__header .q-item__section--side:last-child,
+    .q-uploader__header .q-item__section--side:last-child * {
+    display: inline-flex !important;
+    pointer-events: auto !important;
+    opacity: 1 !important;
+    }
+
+    /* Optional: tighten header height a bit */
+    .q-uploader__header {
+    padding: 6px !important;
+    }
+    </style>
+    """)
+
+    ui.add_head_html("""
+    <style>
+    /* Force filename + size text to stay visible even when file is selected */
+    .q-uploader__file--selected .q-uploader__title,
+    .q-uploader__file--selected .q-uploader__subtitle {
+    opacity: 1 !important;
+    color: #111 !important;
+    visibility: visible !important;
+    }
+    </style>
+    """)
+
     # header
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
         ui.label('Create Tree').classes('text-lg font-semibold')
         with ui.row().classes('items-center gap-2'):
-            # ui.button('POST FLASK', on_click=lambda: ui.navigate.to('/post-flask')).props('flat').classes('text-white')
             ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
 
     # preload metals
@@ -326,19 +390,20 @@ async def create_tree_page(client: Client):
         # LEFT: full-width form
         with split.before:
             with ui.element('div').classes('w-full h-full').style('width:100%; height:100%;'):
-                with ui.card().classes('w-full h-full m-0 p-4'):
-                    d_in = ui.input('Date', value=date.today().isoformat()).props('type=date').classes('w-full')
-                    t_no = ui.input('Tree No').classes('w-full')  # auto-filled
+                with ui.card().props('flat').classes('w-full h-full m-0 p-4'):
+                    with ui.row().classes('w-full justify-between items-end gap-4'):
+                        d_in = ui.input('Date', value=date.today().isoformat()) \
+                                .props('type=date dense filled') \
+                                .classes('flex-1')
+                        t_no = ui.input('Tree No') \
+                                .props('dense filled') \
+                                .classes('flex-1')                        
                     metal_pick = ui.select(options=metal_options, label='Metal').classes('w-full')
 
-                    # pages/trees.py  (inside the LEFT form card, near your other inputs)
-
-                    # --- NEW: collect multiple bag numbers ---
+                    # --- Bags (unchanged) ---
                     bag_vals: List[str] = []  # local UI state
-
                     ui.label('Scan Bags').classes('mt-2')
                     bag_in = ui.input().props('autofocus clearable').classes('w-full')
-
                     chips_row = ui.row().classes('gap-2 flex-wrap mt-2')
 
                     def render_bag_chips():
@@ -355,7 +420,7 @@ async def create_tree_page(client: Client):
                         if s not in bag_vals:
                             bag_vals.append(s)
                             render_bag_chips()
-                        bag_in.value = ''  # clear for the next scan
+                        bag_in.value = ''
 
                     def remove_bag(b: str):
                         try:
@@ -364,17 +429,17 @@ async def create_tree_page(client: Client):
                         except ValueError:
                             pass
 
-                    # Enter to add; also add on blur/change so scanner + manual both work
                     bag_in.on('keydown.enter', lambda e: add_bag(bag_in.value))
                     bag_in.on('change',        lambda e: add_bag(bag_in.value))
-
-                    # (call once so the container exists)
                     render_bag_chips()
 
-
-                    # capture gasket & total here
-                    g_in = ui.number('Gasket Weight', value=0.0).classes('w-full')
-                    tot_in = ui.number('Total Weight', value=0.0).classes('w-full')
+                    # --- Weights (unchanged) ---
+                    # --- Gasket + Total Weight side by side ---
+                    with ui.row().classes('w-full justify-between items-end gap-4'):
+                        g_in = ui.number('Gasket Weight', value=0.0) \
+                                .classes('flex-1')
+                        tot_in = ui.number('Total Weight', value=0.0) \
+                                .classes('flex-1')
 
                     # derived preview
                     tw_label = ui.label('Tree Wt: —').classes('text-gray-600 mt-1')
@@ -398,14 +463,149 @@ async def create_tree_page(client: Client):
                     g_in.on('change', lambda _e: refresh_est())
                     tot_in.on('change', lambda _e: refresh_est())
 
+                    # --- NEW: optional photo upload (after weights) ---
+                    ui.separator().classes('my-2')
+                    ui.label('Photo (optional)').classes('text-gray-700')
+
+                    photo_bytes: bytes | None = None
+                    photo_name: str | None = None
+                    photo_preview = ui.image().classes('w-24 h-24 object-cover rounded border').style('display:none;')
+                    # photo_wrapper = ui.element('div').classes('relative inline-block')
+                    photo_preview = ui.image().classes('w-24 h-24 object-cover rounded border').style('display:none;')
+
+                    # with photo_wrapper:
+                    #     photo_preview
+                    #     remove_btn = ui.button('×', on_click=lambda: clear_photo()) \
+                    #         .classes('absolute top-0 right-0 text-xs bg-white text-black rounded-full shadow hover:bg-gray-200') \
+                    #         .style('display:none;')
+
+                    # wrap uploader so we can position the “×” over the file row
+                    with ui.element('div').classes('relative inline-block'):
+                        uploader = ui.upload(
+                            label='Upload Photo',
+                            multiple=False,
+                            auto_upload=True,
+                            on_upload=None,   # keep your existing handler
+                            # hide-upload-btn=True,
+                        ).props('accept="image/*" capture="environment" no-thumbnails max-files="1" flat square bordered hide-upload-btn=True') \
+                        .classes('w-56')
+
+                        # the “×” over the file row (hidden until a file is present)
+                        file_remove = ui.button(icon='close', on_click=lambda: clear_photo()) \
+                            .props('round dense flat') \
+                            .classes('absolute') \
+                            .style('display:none; right:20px; top:77px; background:none; color:#111; z-index:50; pointer-events:auto;')
+                        
+                        # place this RIGHT AFTER your existing visible `uploader = ui.upload(...)` block
+
+                        # a hidden uploader that is camera-focused; it uses the same _on_file handler
+                        camera_uploader = ui.upload(
+                            label='',
+                            multiple=False,
+                            auto_upload=True,
+                            on_upload=None,  # reuse your existing handler so preview + bytes just work
+                        ).props('accept="image/*" capture="environment" no-thumbnails max-files="1" hide-upload-btn') \
+                        .style('display:none;')
+
+                        # a small button to open the device camera (on mobile it goes straight to camera)
+                        ui.button('Take Photo (Camera)', on_click=lambda: camera_uploader.run_method('pickFiles')) \
+                        .props('flat dense') \
+                        .classes('text-gray-700')
+
+
+
+                    def clear_photo():
+                        nonlocal photo_bytes, photo_name
+                        photo_bytes = None
+                        photo_name = None
+                        photo_preview.style('display:none;')
+                        # remove_btn.style('display:none;')
+                        file_remove.style('display:none;')
+                        uploader.reset()
+                        notify('Photo removed', 'info')
+
+                    def _on_file(e):
+                        nonlocal photo_bytes, photo_name
+                        try:
+                            # Newer NiceGUI (files list with inline content)
+                            files = getattr(e, 'files', None)
+                            if files:
+                                f = files[0]
+                                photo_name = f.get('name', 'upload.jpg')
+                                photo_bytes = f.get('content', b'') or b''
+                            else:
+                                # Older NiceGUI (stream-like content + name)
+                                file_obj = getattr(e, 'content', None)
+                                photo_name = getattr(e, 'name', 'upload.jpg')
+                                photo_bytes = file_obj.read() if file_obj else b''
+
+                            # Preview (only if we actually have bytes)
+                            if photo_bytes:
+                                b64 = base64.b64encode(photo_bytes).decode('ascii')
+                                photo_preview.source = f'data:image/*;base64,{b64}'
+                                photo_preview.style('display:block;')
+                                # clear_photo_btn.style('display:inline-flex;'); clear_photo_btn.update()
+                                # remove_btn.style('display:block;')
+                                file_remove.style('display:block;'); file_remove.update()
+                                photo_preview.update()
+                                # remove_btn.update()
+
+                            else:
+                                photo_preview.style('display:none;')
+                                # clear_photo_btn.style('display:none;'); clear_photo_btn.update()
+                                # remove_btn.style('display:none;')
+                                file_remove.style('display:none;'); file_remove.update()
+
+                            photo_preview.update()
+
+                        except Exception as ex:
+                            print('Upload handler error:', ex)
+                            photo_name = None
+                            photo_bytes = b''
+
+                    uploader.on_upload(_on_file)
+                    # uploader.on_upload(_on_file)
+                    camera_uploader.on_upload(_on_file)
+                    
+                    # uploader = ui.upload(
+                    #     label='Upload Photo',
+                    #     multiple=False,
+                    #     auto_upload=True,
+                    #     on_upload=_on_file
+                    # ).props('accept="image/*" capture="environment" no-thumbnails max-files="1" flat square bordered') \
+                    # .classes('w-56')
+
+                    # # tiny clear button; hidden until a file is present
+                    # clear_photo_btn = ui.button('Remove photo', icon='close', on_click=lambda: asyncio.create_task(_clear_photo())) \
+                    # .props('flat dense') \
+                    # .classes('text-gray-700')
+                    # clear_photo_btn.style('display:none;')
+
+                    # async def _clear_photo():
+                    #     nonlocal photo_bytes, photo_name
+                    #     photo_bytes = None
+                    #     photo_name = None
+                    #     # hide preview
+                    #     photo_preview.style('display:none;'); photo_preview.update()
+                    #     # reset uploader selection
+                    #     try:
+                    #         uploader.reset()
+                    #     except Exception:
+                    #         try:
+                    #             uploader.run_method('reset')   # Quasar method bridged by NiceGUI
+                    #         except Exception:
+                    #             uploader.value = None
+                    #     # hide clear button
+                    #     # clear_photo_btn.style('display:none;'); clear_photo_btn.update()
+                    #     file_remove.style('display:none;'); file_remove.update()  
+
                     async def fill_next_no():
-                        """Fetch and fill the next tree number for current date."""
+                        """Fetch and fill the next tree number."""
                         try:
                             t_no.value = await fetch_next_tree_no()
                         except Exception as ex:
                             notify(f'Failed to auto-assign Tree No: {ex}', 'warning')
 
-                    # Fetch on load and whenever date changes
                     async def _date_changed():
                         await fill_next_no()
                     d_in.on('change', lambda _e: asyncio.create_task(_date_changed()))
@@ -439,9 +639,30 @@ async def create_tree_page(client: Client):
                                 r = await c.post(f'{API_URL}/trees', json=payload)
                                 r.raise_for_status()
                                 data = r.json()
+
+                            nonlocal photo_bytes, photo_name
                             est_label.text = f"Estimated Metal: {float(data['est_metal_weight']):.1f}"
                             notify('Tree created → Transit', 'positive')
+                            print(f'Tree created: ID={data["id"]} No={data["tree_no"]}')
 
+                            # --- NEW: upload photo if provided ---
+                            try:
+                                print(f"{photo_name} upload: {len(photo_bytes or b'')} bytes")
+
+                                # if photo_bytes and photo_name:
+                                if photo_bytes and isinstance(photo_bytes, (bytes, bytearray)) and len(photo_bytes) > 0:
+                                    files = {'file': (photo_name or 'upload.jpg', photo_bytes, 'application/octet-stream')}
+                                    # files = {'file': (photo_name, photo_bytes, 'image/jpeg')}
+                                    async with httpx.AsyncClient(timeout=20.0) as c2:
+                                        r2 = await c2.post(f'{API_URL}/trees/{data["id"]}/photo', files=files)
+                                        r2.raise_for_status()
+                                    notify('Photo uploaded', 'positive')
+                                else:
+                                    print('No photo to upload.')
+                            except Exception as ex_up:
+                                notify(f'Photo upload failed: {ex_up}', 'warning')
+
+                            # print label if requested
                             if do_print:
                                 try:
                                     pdf_bytes = _build_tree_label_pdf_bytes(
@@ -454,7 +675,6 @@ async def create_tree_page(client: Client):
                                     b64 = base64.b64encode(pdf_bytes).decode('ascii')
                                     b64_json = json.dumps(b64)
                                     with client:
-                                        # Open PDF in a new tab (same pattern as Post-Flask)
                                         ui.run_javascript(f"""
                                         (()=>{{
                                           if (window.__labelOpening) return;
@@ -482,6 +702,20 @@ async def create_tree_page(client: Client):
                             render_bag_chips()
                             bag_in.value = ''
 
+                            # clear photo state & preview
+                            photo_bytes = None
+                            photo_name = None
+                            photo_preview.style('display:none;'); photo_preview.update()
+                            try:
+                                # uploader.value = None  # clear selection if supported
+                                uploader.reset()
+                            except Exception:
+                                # pass
+                                uploader.value = None  # fallback
+                            # clear_photo_btn.style('display:none;'); clear_photo_btn.update()
+                            file_remove.style('display:none;'); file_remove.update()
+
+
                             refresh_est()
                             await fill_next_no()
                             await refresh_transit_table()
@@ -500,7 +734,7 @@ async def create_tree_page(client: Client):
                     # initial auto-assign
                     await fill_next_no()
 
-        # RIGHT: transit queue (unchanged aside from columns/filters)
+        # RIGHT: transit queue (unchanged)
         with split.after:
             with ui.card().classes('w-full h-full p-0'):
                 with ui.column().classes('w-full h-full').style('display:flex; flex-direction:column;'):
@@ -514,7 +748,6 @@ async def create_tree_page(client: Client):
                         metal_filter.props('options-dense behavior=menu popup-content-style="z-index:4000"')
 
                         async def reset_filters():
-                            # d_from.value = today_iso; d_to.value = today_iso
                             d_from.value = ''; d_to.value = ''
                             t_search.value = ''; metal_filter.value = 'All'
                             await refresh_transit_table()
