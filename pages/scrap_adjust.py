@@ -21,7 +21,7 @@ async def post_adjust(metal_id: int, action: str, amount: float) -> Dict[str, An
         return r.json()
 
 # ---------- PAGE ----------
-@ui.page('/scrap-adjust')
+@ui.page('/reports/scrap-adjust')
 async def scrap_adjust_page(client: Client):
     ui.page_title('Scrap Reserve Adjust · Casting Tracker')
 
@@ -37,7 +37,8 @@ async def scrap_adjust_page(client: Client):
 
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
         ui.label('Adjust Scrap Reserve').classes('text-lg font-semibold')
-        ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+        # ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+        ui.button('← Reports', on_click=lambda: ui.navigate.to('/dept/reports')).props('flat').classes('text-white font-semibold')
 
     # state
     selected_row: Dict[str, Any] | None = None
@@ -76,7 +77,7 @@ async def scrap_adjust_page(client: Client):
                     # Wide stacked fields (full width underlines like your Supply page)
                     action_sel = ui.select(['Add', 'Remove'], value='Add', label='Action') \
                                    .classes('w-full')
-                    amount_in = ui.number(label='Metal Weight', value=0.0, format='%.1f') \
+                    amount_in = ui.number(label='Metal Weight', value=0.0, format='%.2f') \
                                   .classes('w-full')
 
                     # Preview (grey by default, red if invalid, primary when valid)
@@ -125,15 +126,15 @@ async def scrap_adjust_page(client: Client):
         new_total = current + (amt if act == 'add' else -amt)
 
         if new_total < 0:
-            preview_lbl.text = f'New Reserve: {new_total:.1f}  (cannot go below 0)'
+            preview_lbl.text = f'New Reserve: {new_total:.2f}  (cannot go below 0)'
             preview_lbl.classes(replace='text-base text-negative')
             post_btn.disable()
         elif amt > 0:
-            preview_lbl.text = f'New Reserve: {new_total:.1f}'
+            preview_lbl.text = f'New Reserve: {new_total:.2f}'
             preview_lbl.classes(replace='text-base text-primary')
             post_btn.enable()
         else:
-            preview_lbl.text = f'New Reserve: {new_total:.1f}'
+            preview_lbl.text = f'New Reserve: {new_total:.2f}'
             preview_lbl.classes(replace='text-base text-gray-500')
             post_btn.disable()
 
@@ -148,7 +149,7 @@ async def scrap_adjust_page(client: Client):
             name = selected_row.get('metal_name') or '—'
             qty  = float(selected_row.get('qty_on_hand') or 0.0)
             meta_metal.text   = f'Metal: {name}'
-            meta_current.text = f'Current Reserve: {qty:.1f}'
+            meta_current.text = f'Current Reserve: {qty:.2f}'
 
             # reset inputs & preview
             action_sel.value = 'Add'
@@ -192,7 +193,7 @@ async def scrap_adjust_page(client: Client):
 
         # success: update right panel + table
         new_qty = float(res.get('qty_on_hand') or 0.0)
-        meta_current.text = f'Current Reserve: {new_qty:.1f}'
+        meta_current.text = f'Current Reserve: {new_qty:.2f}'
         preview_lbl.text = 'New Reserve: —'
         preview_lbl.classes(replace='text-base text-gray-500')
         amount_in.value = 0.0

@@ -122,8 +122,8 @@ async def waxing_page(client: Client):
                 # IMPORTANT: include these so they're present in the selected row dict
                 {'name': 'gasket_weight', 'label': 'Gasket', 'field': 'gasket_weight'},
                 {'name': 'total_weight', 'label': 'Total', 'field': 'total_weight'},
-                {'name': 'tree_weight', 'label': 'Tree Wt', 'field': 'tree_weight'},
-                {'name': 'est_metal_weight', 'label': 'Est. Metal', 'field': 'est_metal_weight'},
+                {'name': 'tree_weight', 'label': 'Tree Weight', 'field': 'tree_weight'},
+                {'name': 'est_metal_weight', 'label': 'Req. Metal Weight', 'field': 'est_metal_weight'},
             ]
             tree_table = ui.table(columns=columns, rows=transit_rows, row_key='tree_id', selection='single') \
                           .props('dense flat bordered hide-bottom') \
@@ -158,7 +158,7 @@ async def waxing_page(client: Client):
 
             def recalc_preview():
                 tw = tree_weight_preview(gasket_weight.value or 0, total_weight.value or 0)
-                tw_preview.text = f'Tree Weight (Total – Gasket): {tw:.1f}'
+                tw_preview.text = f'Tree Weight (Total – Gasket): {tw:.2f}'
                 # Keep preview simple; server computes exact final on POST.
                 metal_preview.text = f'Final Metal (preview): {0.0:.3f}'
 

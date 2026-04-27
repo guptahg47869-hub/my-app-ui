@@ -22,6 +22,7 @@ import pages.waxing
 import pages.supply
 import pages.casting
 import pages.quenching
+import pages.casting_metal_out
 import pages.cutting
 import pages.reports
 import pages.reports_transit
@@ -29,7 +30,14 @@ import pages.reports_scrap_loss
 import pages.scrap_adjust
 import pages.metal_prep
 import pages.reconciliation
+import pages.job_bag_supply
 import pages.flask_search
+import pages.dept_casting
+import pages.dept_inventory
+import pages.dept_job_bag   
+import pages.dept_wax_room
+import pages.dept_cutting
+import pages.dept_reports
 
 
 if __name__ in {"__main__", "__mp_main__"}:

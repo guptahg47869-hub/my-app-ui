@@ -42,9 +42,9 @@ def rule_for_metal(metal_name: str) -> dict:
     if m.startswith('10'):
         return {'type': 'gold_pct', 'pct': 0.417}
     if m.startswith('14'):
-        return {'type': 'gold_pct', 'pct': 0.587}
+        return {'type': 'gold_pct', 'pct': 0.586}
     if m.startswith('18'):
-        return {'type': 'gold_pct', 'pct': 0.752}
+        return {'type': 'gold_pct', 'pct': 0.755}
     return {'type': 'none'}
 
 def split_with_ratio(total: float, fine_part: int, alloy_part: int):
@@ -144,7 +144,7 @@ def build_simple_label_pdf(*, flask_no: str, tree_no: str, metal_name: str,
     c.line(0, y, W, y); y -= 16
 
     c.setFont('Helvetica', 10)
-    c.drawString(M, y, 'Metal Weight:'); c.drawRightString(W-M, y, f'{required:.1f}'); y -= 16
+    c.drawString(M, y, 'Metal Weight:'); c.drawRightString(W-M, y, f'{required:.2f}'); y -= 16
 
     c.drawString(M, y, 'Casting Weight:'); c.line(M+80, y-1, W-M, y-1); y -= 16
     c.drawString(M, y, 'Cutting Weight:'); c.line(M+80, y-1, W-M, y-1); y -= 20
@@ -186,9 +186,10 @@ async def metal_prep_page(client: Client):
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
         ui.label('Metal Prep').classes('text-lg font-semibold')
         with ui.row().classes('items-center gap-2'):
-            ui.button('METAL SUPPLY', on_click=lambda: ui.navigate.to('/supply')).props('flat').classes('text-white')
-            ui.button('RECONCILIATION', on_click=lambda: ui.navigate.to('/reconciliation')).props('flat').classes('text-white')
-            ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+            ui.button('← Inventory', on_click=lambda: ui.navigate.to('/dept/inventory')).props('flat').classes('text-white font-semibold')
+            # ui.button('METAL SUPPLY', on_click=lambda: ui.navigate.to('/supply')).props('flat').classes('text-white')
+            # ui.button('RECONCILIATION', on_click=lambda: ui.navigate.to('/reconciliation')).props('flat').classes('text-white')
+            # ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
 
     # preload metal list (for filter dropdown)
     try:
@@ -241,7 +242,7 @@ async def metal_prep_page(client: Client):
                             {'name': 'flask_no', 'label': 'Flask No', 'field': 'flask_no'},
                             {'name': 'tree_no', 'label': 'Tree No', 'field': 'tree_no'},
                             {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
-                            {'name': 'required_metal_weight', 'label': 'Req. Metal', 'field': 'required_metal_weight'},
+                            {'name': 'required_metal_weight', 'label': 'Req. Metal Weight', 'field': 'required_metal_weight'},
                         ]
                         queue_table = ui.table(columns=columns, rows=[]) \
                             .props('dense flat bordered row-key="flask_id" selection="single" hide-bottom') \
@@ -270,7 +271,7 @@ async def metal_prep_page(client: Client):
                     ui.label('Flask No:');  flask_no_lbl = ui.label('—')
                     ui.label('Tree No:');   tree_no_lbl  = ui.label('—')
                     ui.label('Metal:');     metal_lbl    = ui.label('—')
-                    ui.label('Required Wt:'); req_lbl    = ui.label('—')
+                    ui.label('Required Weight:'); req_lbl    = ui.label('—')
                     ui.label('Date:');      date_lbl     = ui.label('—')
 
                 scrap_in = ui.number('Scrap', value=0.0).classes('w-full')
@@ -289,8 +290,8 @@ async def metal_prep_page(client: Client):
 
                 with ui.row().classes('gap-3 mt-2'):
                     btn_recalc    = ui.button('RECALCULATE').props('outline').classes('bg-white text-gray-800')
-                    btn_prepared  = ui.button('PREPARED • POST').props('unelevated color=primary').classes('text-white')
-                    btn_unprepared= ui.button('NOT PREPARED • POST').props('unelevated color=primary').classes('text-white')
+                    btn_prepared  = ui.button('POST TO CASTING METAL IN').props('unelevated color=primary').classes('text-white')
+                    # btn_unprepared= ui.button('NOT PREPARED • POST').props('unelevated color=primary').classes('text-white')
 
     # ---------- state & behaviors ----------
     def _required(row: dict) -> float:
@@ -312,13 +313,13 @@ async def metal_prep_page(client: Client):
 
         if rule['type'] == 'pure_only':
             tot = s + float(pure_in.value or 0.0)
-        elif rule['type'] == 'gold_ratio':
+        elif rule['type'] == 'gold_pct':
             tot = s + float(fine_in.value or 0.0) + float(alloy_in.value or 0.0)
         else:
             tot = s
 
         with client:
-            preview.text = f'Total: {tot:.1f} (Req: {req:.1f})'
+            preview.text = f'Total: {tot:.2f} (Req: {req:.2f})'
 
 
     # override flags (match Supply behavior)
@@ -357,11 +358,11 @@ async def metal_prep_page(client: Client):
         total = 0.0
         if rule['type'] == 'pure_only':
             total = (float(scrap_in.value or 0.0) + float(pure_in.value or 0.0))
-        elif rule['type'] == 'gold_ratio':
+        elif rule['type'] == 'gold_pct':
             total = (float(scrap_in.value or 0.0) + float(fine_in.value or 0.0) + float(alloy_in.value or 0.0))
         else:
             total = float(scrap_in.value or 0.0)
-        preview.text = f'Total: {total:.1f} (Req: {req:.1f})'
+        preview.text = f'Total: {total:.2f} (Req: {req:.2f})'
 
     def on_scrap_change(_e):
         auto_fill_from_required()
@@ -450,7 +451,7 @@ async def metal_prep_page(client: Client):
             flask_no_lbl.text = f"{sel.get('flask_no')}"
             tree_no_lbl.text  = f"{sel.get('tree_no') or '—'}"
             metal_lbl.text    = f"{sel.get('metal_name')}"
-            req_lbl.text      = f"{req:.1f}"
+            req_lbl.text      = f"{req:.2f}"
             date_lbl.text     = to_ui_date(sel.get('date_iso') or sel.get('date') or date.today().isoformat())
 
         # decide visible box
@@ -462,16 +463,13 @@ async def metal_prep_page(client: Client):
             preset = await get_preset(int(_row_id(sel)))
         except Exception:
             preset = {}
-        if preset.get('prepared'):
-            with client:
-                scrap_in.value = float(preset.get('scrap_planned') or 0.0)
-                fine_in.value  = float(preset.get('fine_24k_planned') or 0.0)
-                alloy_in.value = float(preset.get('alloy_planned') or 0.0)
-                pure_in.value  = float(preset.get('pure_planned') or 0.0)
-        else:
-            with client:
-                scrap_in.value = fine_in.value = alloy_in.value = pure_in.value = 0.0
 
+        with client:
+            scrap_in.value = float(preset.get('scrap_planned') or 0.0)
+            fine_in.value  = float(preset.get('fine_24k_planned') or 0.0)
+            alloy_in.value = float(preset.get('alloy_planned') or 0.0)
+            pure_in.value  = float(preset.get('pure_planned') or 0.0)
+            
         # compute preview on load
         recalc_click()
 
@@ -510,7 +508,7 @@ async def metal_prep_page(client: Client):
         except Exception as ex:
             notify(f'Label error: {ex}', 'warning')
 
-    async def do_post(prepared: bool):
+    async def do_post():
         sel = (queue_table.selected or [None])[0]
         if not sel:
             notify('Select a flask from the queue', 'warning'); return
@@ -520,7 +518,7 @@ async def metal_prep_page(client: Client):
 
         payload = {
             'flask_id': int(fid),
-            'prepared': bool(prepared),
+            # 'prepared': bool(prepared),
             'scrap_planned': float(scrap_in.value or 0.0),
             'fine_24k_planned': float(fine_in.value or 0.0),
             'alloy_planned': float(alloy_in.value or 0.0),
@@ -530,7 +528,7 @@ async def metal_prep_page(client: Client):
         try:
             await post_prep(payload)
             with client:
-                ui.notify('Moved to Supply', color='positive')
+                ui.notify('Moved to Casting Metal In', color='positive')
                 queue_table.selected = []
             await refresh_queue()
             await load_reserves()
@@ -543,8 +541,8 @@ async def metal_prep_page(client: Client):
 
     # wire up
     btn_print.on('click', do_print_label)
-    btn_prepared.on('click',   lambda: asyncio.create_task(do_post(True)))
-    btn_unprepared.on('click', lambda: asyncio.create_task(do_post(False)))
+    btn_prepared.on('click',   lambda: asyncio.create_task(do_post()))
+    # btn_unprepared.on('click', lambda: asyncio.create_task(do_post(False)))
     queue_table.on('selection', lambda _e: asyncio.create_task(hydrate_right()))
 
     # initial load

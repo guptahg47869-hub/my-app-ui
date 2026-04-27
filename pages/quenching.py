@@ -103,7 +103,8 @@ async def quenching_page(client: Client):
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
         ui.label('Quenching Queue').classes('text-lg font-semibold')
         with ui.row().classes('items-center gap-2'):
-            ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+            # ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+            ui.button('← Casting Dept', on_click=lambda: ui.navigate.to('/dept/casting')).props('flat').classes('text-white font-semibold')
 
     # preload metals for filter
     try:
@@ -148,7 +149,7 @@ async def quenching_page(client: Client):
                             {'name': 'flask_no', 'label': 'Flask No', 'field': 'flask_no'},
                             {'name': 'tree_no',  'label': 'Tree No',  'field': 'tree_no'},
                             {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
-                            {'name': 'metal_weight', 'label': 'Req. Metal', 'field': 'metal_weight'},
+                            {'name': 'metal_weight', 'label': 'Casting In Weight', 'field': 'metal_weight'},
                             {'name': 'ready_at_est', 'label': 'Ready At', 'field': 'ready_at_est'},
                             {'name': 'time_left', 'label': 'Time Left', 'field': 'time_left_display'},
                         ]
@@ -167,7 +168,8 @@ async def quenching_page(client: Client):
 
         # RIGHT: big-panel details + post
         with main_split.after:
-            with ui.card().classes('w-full h-full p-6 flex flex-col items-start justify-start'):
+            # with ui.card().classes('w-full h-full p-6 flex flex-col items-start justify-start'):
+            with ui.card().props('flat').classes('w-full h-full p-4 overflow-auto'):
                 ui.label('Quenching Details').classes('text-2xl font-semibold mb-4')
 
                 flask_no_lbl = ui.label('Flask: —').classes('text-4xl font-extrabold')
@@ -179,11 +181,15 @@ async def quenching_page(client: Client):
                 with ui.grid(columns=2).classes('gap-6 w-full'):
                     with ui.card().classes('w-full flex flex-col items-center p-6'):
                         ui.label('Ready At (EST)').classes('text-lg text-gray-500')
-                        ready_tile_lbl = ui.label('—').classes('text-7xl font-extrabold num-shadow')
+                        ready_tile_lbl = ui.label('—').classes('text-6xl font-extrabold num-shadow')
+                        # ready_tile_lbl = ui.label('—').style(
+                        #     'font-size: clamp(2.5rem, 6vw, 4.5rem);'
+                        # ).classes('font-extrabold num-shadow text-center')
+
 
                     with ui.card().classes('w-full flex flex-col items-center p-6'):
                         ui.label('Time Left (min)').classes('text-lg text-gray-500')
-                        left_lbl = ui.label('—').classes('text-7xl font-extrabold num-shadow')
+                        left_lbl = ui.label('—').classes('text-6xl font-extrabold num-shadow')
 
                 def _set_time_color(ml: int | None):
                     # clear previous state
@@ -243,7 +249,7 @@ async def quenching_page(client: Client):
                         notify('Select a flask first.', 'warning'); return
                     try:
                         await post_to_cutting(int(selected['id']))
-                        notify('Moved to Cutting', 'positive')
+                        notify('Moved to Casting Out', 'positive')
                         # remove from table and clear
                         with client:
                             quench_table.rows = [r for r in quench_table.rows if r['id'] != selected['id']]
@@ -253,8 +259,9 @@ async def quenching_page(client: Client):
                     except Exception as ex:
                         notify(str(ex), 'negative')
 
-                ui.button('POST TO CUTTING', on_click=lambda: asyncio.create_task(advance_to_cutting())) \
-                  .classes('bg-emerald-600 text-white mt-6 text-2xl py-4 px-6 rounded-xl shadow-lg')
+                with ui.row().classes('w-full justify-center mt-8'):
+                    ui.button('POST TO CASTING OUT', on_click=lambda: asyncio.create_task(advance_to_cutting())) \
+                    .classes('bg-emerald-600 text-white text-lg py-3 px-6 rounded-xl shadow-lg')
 
     # -------- filters & refresh --------
     def _apply_filters(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

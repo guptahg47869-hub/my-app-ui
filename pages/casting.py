@@ -84,6 +84,21 @@ async def post_complete_casting(flask_id: int) -> Dict[str, Any]:
             raise RuntimeError(explain_http_error(e)) from e
         return r.json()
 
+async def patch_metal_temps(metal_id: int, casting_temp: float | None, oven_temp: float | None) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=15.0) as c:
+        r = await c.patch(
+            f'{API_URL}/metals/{metal_id}/temps',
+            json={
+                "casting_temp": casting_temp,
+                "oven_temp": oven_temp,
+                "updated_by": "casting_ui",
+            },
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+
 # ---------- PAGE ----------
 @ui.page('/casting')
 async def casting_page(client: Client):
@@ -102,12 +117,15 @@ async def casting_page(client: Client):
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
         ui.label('Casting Queue').classes('text-lg font-semibold')
         with ui.row().classes('items-center gap-2'):
-            ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+            # ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+            ui.button('← Casting Dept', on_click=lambda: ui.navigate.to('/dept/casting')).props('flat').classes('text-white font-semibold')
 
     # preload metals for filter
     try:
         metals = await fetch_metals()
         metal_options = ['All'] + sorted([m['name'] for m in metals if 'name' in m])
+        metal_by_name = {m['name']: m for m in metals if 'name' in m}
+
     except Exception:
         metal_options = ['All']
 
@@ -146,7 +164,7 @@ async def casting_page(client: Client):
                             {'name': 'flask_no', 'label': 'Flask No', 'field': 'flask_no'},
                             {'name': 'tree_no',  'label': 'Tree No',  'field': 'tree_no'},
                             {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
-                            {'name': 'metal_weight', 'label': 'Req. Metal', 'field': 'metal_weight'},
+                            {'name': 'metal_weight', 'label': 'Casting In Weight', 'field': 'metal_weight'},
                         ]
                         casting_table = ui.table(columns=columns, rows=[]) \
                                           .props('dense flat bordered row-key="id" selection="single" hide-bottom') \
@@ -187,7 +205,9 @@ async def casting_page(client: Client):
 
         # RIGHT: GIANT details + post button
         with main_split.after:
-            with ui.card().classes('w-full h-full p-6 flex flex-col items-start justify-start'):
+            # with ui.card().classes('w-full h-full p-6 flex flex-col items-start justify-start'):
+            with ui.card().props('flat').classes('w-full h-full p-4 overflow-auto'):
+
                 ui.label('Casting Details').classes('text-2xl font-semibold mb-4')
 
                 # Big identifiers
@@ -198,12 +218,32 @@ async def casting_page(client: Client):
 
                 # Huge temps (side-by-side on wide screens)
                 with ui.grid(columns=2).classes('gap-6 w-full'):
+
                     with ui.card().classes('w-full flex flex-col items-center p-6'):
                         ui.label('Casting Temp').classes('text-lg text-gray-500')
-                        cast_lbl = ui.label('—').classes('text-7xl font-extrabold num-shadow')
+                        cast_lbl = ui.label('—').classes('text-6xl font-extrabold num-shadow')
+                        suggest_cast_lbl = ui.label('Suggested temperature: —').classes('text-sm text-gray-500')
+                        cast_edit = ui.number('Edit Casting Temp', value=0).props('step=1').classes('w-full')
+
                     with ui.card().classes('w-full flex flex-col items-center p-6'):
                         ui.label('Oven Temp').classes('text-lg text-gray-500')
-                        oven_lbl = ui.label('—').classes('text-7xl font-extrabold num-shadow')
+                        oven_lbl = ui.label('—').classes('text-6xl font-extrabold num-shadow')
+                        suggest_oven_lbl = ui.label('Suggested temperature: —').classes('text-sm text-gray-500')
+                        oven_edit = ui.number('Edit Oven Temp', value=0).props('step=1').classes('w-full')
+
+                    # with ui.row().classes('gap-2 mt-2'):
+                    #     ui.button('SAVE TEMPS FOR METAL', on_click=lambda: asyncio.create_task(save_temps())).classes('bg-emerald-600 text-white')
+                    #     ui.button('RESET TO SUGGESTED', on_click=lambda: asyncio.create_task(reset_to_suggested())).props('outline')
+                    # buttons row: centered, smaller, both white
+                with ui.row().classes('w-full justify-center gap-3 mt-2'):
+                    ui.button('SAVE TEMPS', on_click=lambda: asyncio.create_task(save_temps())) \
+                    .props('outline') \
+                    .classes('bg-white text-gray-800 font-semibold text-sm px-4 py-2')
+
+                    ui.button('RESET TO SUGGESTED', on_click=lambda: asyncio.create_task(reset_to_suggested())) \
+                    .props('outline') \
+                    .classes('bg-white text-gray-800 font-semibold text-sm px-4 py-2')
+
 
                 time_lbl = ui.label('').classes('text-gray-600 mt-4 text-lg')
 
@@ -211,6 +251,7 @@ async def casting_page(client: Client):
                     nonlocal selected
                     row_list = casting_table.selected or []
                     selected = row_list[0] if row_list else None
+
                     with client:
                         if not selected:
                             flask_no_lbl.text = 'Flask: —'
@@ -218,13 +259,54 @@ async def casting_page(client: Client):
                             cast_lbl.text = '—'
                             oven_lbl.text = '—'
                             time_lbl.text = ''
-                        else:
-                            flask_no_lbl.text = f"Flask: {selected.get('flask_no','—')}"
-                            mname = selected.get('metal_name','—')
-                            metal_lbl.text = f"Metal: {mname}"
-                            cast_lbl.text = f"{casting_temp_for(mname):.0f}"
-                            oven_lbl.text = f"{oven_temp_for(mname):.0f}"
-                            time_lbl.text = ''
+
+                            # NEW: suggested labels + edit fields reset
+                            suggest_cast_lbl.text = 'Suggested temperature: —'
+                            suggest_oven_lbl.text = 'Suggested temperature: —'
+                            cast_edit.value = None
+                            oven_edit.value = None
+                            return
+
+                        flask_no_lbl.text = f"Flask: {selected.get('flask_no','—')}"
+                        mname = selected.get('metal_name', '—')
+                        metal_lbl.text = f"Metal: {mname}"
+                        time_lbl.text = ''
+
+                        # Suggested temps (hardcoded logic)
+                        try:
+                            suggested_cast = float(casting_temp_for(mname))
+                        except Exception:
+                            suggested_cast = 0.0
+                        try:
+                            suggested_oven = float(oven_temp_for(mname))
+                        except Exception:
+                            suggested_oven = 0.0
+
+                        suggest_cast_lbl.text = f"Suggested temperature: {suggested_cast:.0f}"
+                        suggest_oven_lbl.text = f"Suggested temperature: {suggested_oven:.0f}"
+
+                        # Override temps (from DB via GET /metals -> metal_by_name)
+                        mrec = metal_by_name.get(mname, {}) if 'metal_by_name' in locals() else {}
+                        override_cast = mrec.get('casting_temp_override', None)
+                        override_oven = mrec.get('oven_temp_override', None)
+
+                        # Display temps: override if present else suggested
+                        try:
+                            display_cast = float(override_cast) if override_cast is not None else suggested_cast
+                        except Exception:
+                            display_cast = suggested_cast
+
+                        try:
+                            display_oven = float(override_oven) if override_oven is not None else suggested_oven
+                        except Exception:
+                            display_oven = suggested_oven
+
+                        cast_lbl.text = f"{display_cast:.0f}"
+                        oven_lbl.text = f"{display_oven:.0f}"
+
+                        # Prefill edit inputs to the current display
+                        cast_edit.value = display_cast
+                        oven_edit.value = display_oven
 
                 casting_table.on('selection', lambda _e: asyncio.create_task(sync_selection()))
 
@@ -250,8 +332,11 @@ async def casting_page(client: Client):
                     except Exception as ex:
                         notify(str(ex), 'negative')
 
-                ui.button('POST TO QUENCHING', on_click=lambda: asyncio.create_task(post_to_quenching())) \
-                  .classes('bg-emerald-600 text-white mt-6 text-2xl py-4 px-6 rounded-xl shadow-lg')
+                # ui.button('POST TO QUENCHING', on_click=lambda: asyncio.create_task(post_to_quenching())) \
+                #   .classes('bg-emerald-600 text-white mt-6 text-2xl py-4 px-6 rounded-xl shadow-lg')
+                with ui.row().classes('w-full justify-center mt-8'):
+                    ui.button('POST TO QUENCHING', on_click=lambda: asyncio.create_task(post_to_quenching())) \
+                    .classes('bg-emerald-600 text-white text-lg py-3 px-6 rounded-xl shadow-lg')
 
     # -------- filters & refresh --------
     def _apply_filters(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -298,15 +383,105 @@ async def casting_page(client: Client):
         return out
 
     async def refresh_table():
+        nonlocal metals, metal_options, metal_by_name
+
+        # 1) refresh metals so overrides reflect latest saved values
         try:
-            # raw = await fetch_casting_queue(flask_no=(f_search.value or '').strip() or None)
+            metals = await fetch_metals()
+            metal_by_name = {m['name']: m for m in metals if 'name' in m}
+
+            # only rebuild options if you want it always fresh
+            metal_options = ['All'] + sorted([m['name'] for m in metals if 'name' in m])
+            # keep current selection if possible
+            cur = metal_filter.value if hasattr(metal_filter, 'value') else 'All'
+            metal_filter.options = metal_options
+            if cur in metal_options:
+                metal_filter.value = cur
+            else:
+                metal_filter.value = 'All'
+        except Exception:
+            # don’t hard-fail table refresh if metals refresh fails
+            pass
+
+        # 2) fetch queue rows
+        try:
             raw = await fetch_casting_queue()
         except Exception as e:
             notify(f'Failed to fetch casting queue: {e}', 'negative')
             raw = []
+
         rows = _apply_filters(raw)
-        casting_table.rows = rows
-        casting_table.update()
+
+        # 3) preserve selection by flask_id (same pattern as other pages)
+        selected_id = None
+        try:
+            if casting_table.selected:
+                selected_id = casting_table.selected[0].get('flask_id')
+        except Exception:
+            selected_id = None
+
+        with client:
+            casting_table.rows = rows
+            if selected_id is not None:
+                re_row = next((r for r in rows if r.get('flask_id') == selected_id), None)
+                casting_table.selected = [re_row] if re_row else []
+            casting_table.update()
+
+        # 4) refresh right panel values (so new metal overrides apply immediately)
+        await sync_selection()
+
+    async def save_temps():
+        if not selected:
+            notify('Select a flask first.', 'warning')
+            return
+
+        mname = selected.get('metal_name')
+        if not mname or mname not in metal_by_name:
+            notify('Metal not found for this flask.', 'negative')
+            return
+
+        metal_id = int(metal_by_name[mname]['id'])
+
+        try:
+            new_cast = float(cast_edit.value) if cast_edit.value is not None else None
+            new_oven = float(oven_edit.value) if oven_edit.value is not None else None
+        except Exception:
+            notify('Invalid temperature values.', 'negative')
+            return
+
+        try:
+            await patch_metal_temps(metal_id, new_cast, new_oven)
+            # update local cache so UI immediately reflects saved values
+            metal_by_name[mname]['casting_temp_override'] = new_cast
+            metal_by_name[mname]['oven_temp_override'] = new_oven
+            notify('Saved temps for metal.', 'positive')
+            await sync_selection()
+        except Exception as e:
+            notify(f'Failed to save temps: {e}', 'negative')
+
+
+    async def reset_to_suggested():
+        if not selected:
+            notify('Select a flask first.', 'warning')
+            return
+
+        mname = selected.get('metal_name')
+        if not mname or mname not in metal_by_name:
+            notify('Metal not found for this flask.', 'negative')
+            return
+
+        metal_id = int(metal_by_name[mname]['id'])
+
+        # clearing override -> send nulls
+        try:
+            await patch_metal_temps(metal_id, None, None)
+            metal_by_name[mname]['casting_temp_override'] = None
+            metal_by_name[mname]['oven_temp_override'] = None
+            notify('Reset to suggested temps.', 'positive')
+            await sync_selection()
+        except Exception as e:
+            notify(f'Failed to reset temps: {e}', 'negative')
+
 
     # events
     metal_filter.on('update:model-value', lambda _v: asyncio.create_task(refresh_table()))

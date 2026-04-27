@@ -72,7 +72,8 @@ async def cutting_page(client: Client):
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
         ui.label('Cutting Queue').classes('text-lg font-semibold')
         with ui.row().classes('items-center gap-2'):
-            ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+            # ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+            ui.button('← Cutting', on_click=lambda: ui.navigate.to('/dept/cutting')).props('flat').classes('text-white font-semibold')
 
     # preload metals for filter
     try:
@@ -122,7 +123,7 @@ async def cutting_page(client: Client):
                             {'name': 'tree_no',  'label': 'Tree No',  'field': 'tree_no'},
                             {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
                             # rename header only; field stays 'metal_weight' (supplied)
-                            {'name': 'metal_weight', 'label': 'Supplied Wt', 'field': 'metal_weight'},
+                            {'name': 'metal_weight', 'label': 'Casting Out Weight', 'field': 'metal_weight'},
                         ]
                         cut_table = ui.table(columns=columns, rows=[]) \
                                       .props('dense flat bordered row-key="id" selection="single" hide-bottom') \
@@ -130,22 +131,23 @@ async def cutting_page(client: Client):
 
         # RIGHT: details + form + post (matches "Post Flask" style)
         with main_split.after:
-            with ui.card().classes('w-full h-full p-6'):
+            # with ui.card().classes('w-full h-full p-6'):
+            with ui.card().props('flat').classes('w-full h-full p-4 overflow-auto'):
                 ui.label('Cutting Details').classes('text-base font-semibold mb-2')
 
                 with ui.grid(columns=2).classes('gap-2 mb-2'):
                     ui.label('Flask No:'); flask_lbl = ui.label('—')
                     ui.label('Metal:');    metal_lbl = ui.label('—')
-                    ui.label('Supplied Wt:'); metal_wt_lbl = ui.label('—')  # renamed
+                    ui.label('Casting Out Weight:'); metal_wt_lbl = ui.label('—')  # renamed
 
                 # Form inputs
                 before_cut = ui.number('Before Cutting Weight', value=0.0).props('step=0.001').classes('w-full')
-                after_cast = ui.number('After Cut: Casting Weight', value=0.0).props('step=0.001').classes('w-full')
+                after_cast = ui.number('After Cut: Consumable Weight', value=0.0).props('step=0.001').classes('w-full')
                 after_scrap = ui.number('After Cut: Scrap Weight', value=0.0).props('step=0.001').classes('w-full')
 
                 # Preview: show (i), (ii), and TOTAL
-                preview_i    = ui.label('(i) Metal Loss in Casting: —').classes('text-gray-600')
-                preview_ii   = ui.label('(ii) Metal Loss in Cutting : —').classes('text-gray-600')
+                preview_i    = ui.label('(i) Transit Loss: —').classes('text-gray-600')
+                preview_ii   = ui.label('(ii) Cutting Loss: —').classes('text-gray-600')
                 preview_total= ui.label('Total Scrap Loss: —').classes('text-gray-800 font-semibold')
 
                 def update_preview_and_draft():
@@ -159,9 +161,9 @@ async def cutting_page(client: Client):
                         part_ii = A - (B + C)
                         total   = supplied - (B + C)
 
-                        preview_i.text     = f'(i) Metal Loss in Casting: {part_i:.1f}'
-                        preview_ii.text    = f'(ii) Metal Loss in Cutting: {part_ii:.1f}'
-                        preview_total.text = f'Total Scrap Loss: {total:.1f}'
+                        preview_i.text     = f'(i) Transit Loss: {part_i:.2f}'
+                        preview_ii.text    = f'(ii) Cutting Loss: {part_ii:.2f}'
+                        preview_total.text = f'Total Scrap Loss: {total:.2f}'
 
                         # color total if negative
                         preview_total.classes(remove='text-negative')
@@ -172,8 +174,8 @@ async def cutting_page(client: Client):
                         if selected and isinstance(selected.get('id'), int):
                             drafts[int(selected['id'])] = {'before': A, 'casting': C, 'scrap': B}
                     except Exception:
-                        preview_i.text = '(i) Metal Loss in Casting: —'
-                        preview_ii.text = '(ii) Metal Loss in Cutting: —'
+                        preview_i.text = '(i) Transit Loss: —'
+                        preview_ii.text = '(ii) Cutting Loss: —'
                         preview_total.text = 'Total Scrap Loss: —'
 
                 before_cut.on('change', lambda _: update_preview_and_draft())
@@ -215,7 +217,7 @@ async def cutting_page(client: Client):
                         except Exception:
                             mw = 0.0
                         current_supplied = mw
-                        metal_wt_lbl.text = f"{mw:.1f}" if mw_raw is not None else '—'
+                        metal_wt_lbl.text = f"{mw:.2f}" if mw_raw is not None else '—'
 
                         # ---- inputs: use per-flask draft if present; otherwise prefill A = supplied ----
                         sel_id = int(selected.get('id'))
@@ -245,7 +247,7 @@ async def cutting_page(client: Client):
 
                         # A within 5% of supplied
                         if supplied > 0.0 and abs(A - supplied) > 0.05 * supplied:
-                            notify(f'Before-cut must be within 5% of supplied ({supplied:.1f}).', 'negative')
+                            notify(f'Before-cut must be within 5% of supplied ({supplied:.2f}).', 'negative')
                             return
 
                         # (B + C) within 5% of A
@@ -265,7 +267,7 @@ async def cutting_page(client: Client):
 
                     try:
                         await post_cutting(payload)
-                        notify('Sent to Reconciliation', 'positive')
+                        notify('Moved to Reconciliation', 'positive')
                         # remove from table and clear
                         with client:
                             cut_table.rows = [r for r in cut_table.rows if r['id'] != selected['id']]
@@ -277,7 +279,7 @@ async def cutting_page(client: Client):
 
                 with ui.row().classes('gap-2 mt-2'):
                     ui.button('RECALCULATE', on_click=update_preview_and_draft).props('outline')
-                    ui.button('POST CUTTING', on_click=lambda: asyncio.create_task(submit_cutting())) \
+                    ui.button('POST TO RECONCILIATION', on_click=lambda: asyncio.create_task(submit_cutting())) \
                       .classes('bg-emerald-600 text-white')
 
     # -------- filtering & refresh --------

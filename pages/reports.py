@@ -99,7 +99,11 @@ async def reports_page(client: Client):
 
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
         ui.label('Reports').classes('text-lg font-semibold')
-        ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+        # ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+        with ui.row().classes('items-center gap-2'):
+            ui.button('← Inventory', on_click=lambda: ui.navigate.to('/dept/inventory')).props('flat').classes('text-white font-semibold')
+            ui.button('← Job Bag Supply', on_click=lambda: ui.navigate.to('/dept/job-bag')).props('flat').classes('text-white font-semibold')
+            ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
 
     # preload metals
     try:
@@ -214,8 +218,8 @@ async def reports_page(client: Client):
                             {'name': 'date', 'label': 'Date', 'field': 'date'},
                             {'name': 'tree_no', 'label': 'Tree No', 'field': 'tree_no'},
                             {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
-                            {'name': 'tree_weight', 'label': 'Tree Wt', 'field': 'tree_weight'},
-                            {'name': 'est_metal_weight', 'label': 'Est. Metal', 'field': 'est_metal_weight'},
+                            {'name': 'tree_weight', 'label': 'Tree Weight', 'field': 'tree_weight'},
+                            {'name': 'est_metal_weight', 'label': 'Req. Metal Weight', 'field': 'est_metal_weight'},
                         ]
                         drill_table = ui.table(columns=drill_columns, rows=[]) \
                                         .props('dense flat bordered row-key="tree_id" hide-bottom') \
@@ -289,7 +293,7 @@ async def reports_page(client: Client):
 
         overall = js.get('overall_total', 0.0)
         f = to_ui_date(d_from.value); t = to_ui_date(d_to.value)
-        total_lbl.text = f"Total in Transit ({f} → {t}, {metal_filter.value}): {overall:.1f}"
+        total_lbl.text = f"Total in Transit ({f} → {t}, {metal_filter.value}): {overall:.2f}"
 
         # clear drilldown
         drill_title.text = 'Details (select a metal to see trees)'

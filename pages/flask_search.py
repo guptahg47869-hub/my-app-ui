@@ -24,6 +24,12 @@ def to_mmddyy(iso: str) -> str:
     except Exception:
         return iso
     
+def to_mmdd(iso: str) -> str:
+    try:
+        return datetime.strptime(iso, '%Y-%m-%d').strftime('%m/%d')
+    except Exception:
+        return iso
+
 def rows_to_csv_bytes(rows, field_order):
     buf = StringIO()
     writer = csv.DictWriter(buf, fieldnames=field_order, extrasaction='ignore')
@@ -36,17 +42,19 @@ def rows_to_csv_bytes(rows, field_order):
 STAGE_LABELS = {
     'transit': 'Transit',
     'metal_prep': 'Metal Prep',
-    'supply': 'Supply',
+    'casting_metal_in': 'Casting Metal In',
     'casting': 'Casting',
+    'casting_metal_out': 'Casting Metal Out',
     'quenching': 'Quenching',
     'cutting': 'Cutting',
     'reconciliation': 'Reconciliation',
+    'job_bag_supply': 'Job Bag Supply',
     'done': 'Done',
 }
 LABEL_TO_STAGE = {v: k for k, v in STAGE_LABELS.items()}
 STAGE_ORDER = {
-    'transit': 0, 'metal_prep': 1, 'supply': 2, 'casting': 3,
-    'quenching': 4, 'cutting': 5, 'reconciliation': 6, 'done': 7,
+    'transit': 0, 'metal_prep': 1, 'casting_metal_in': 2, 'casting': 3, 'casting_metal_out': 4,
+    'quenching': 5, 'cutting': 6, 'reconciliation': 7, 'job_bag_supply': 8, 'done': 9,
 }
 
 async def fetch_metals() -> List[str]:
@@ -64,9 +72,78 @@ async def fetch_search(params: Dict[str, Any]) -> List[Dict[str, Any]]:
         r = await c.get(f'{API_URL}/search/flasks', params=params)
         r.raise_for_status()
         return r.json()
+    
+async def fetch_weight_history(flask_id: int) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=15.0) as c:
+        r = await c.get(f'{API_URL}/search/flasks/{flask_id}/weight_history')
+        r.raise_for_status()
+        return r.json()
+
+async def fetch_tree_weight_history(tree_id: int) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=15.0) as c:
+        r = await c.get(f'{API_URL}/search/trees/{tree_id}/weight_history')
+        r.raise_for_status()
+        return r.json()
+
+async def update_flask_bags(flask_id: int, bag_nos: List[str]) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=15.0) as c:
+        r = await c.put(f'{API_URL}/search/flasks/{flask_id}/bags', json={'bag_nos': bag_nos})
+        r.raise_for_status()
+        return r.json()
+
+async def update_tree_bags(tree_id: int, bag_nos: List[str]) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=15.0) as c:
+        r = await c.put(f'{API_URL}/search/trees/{tree_id}/bags', json={'bag_nos': bag_nos})
+        r.raise_for_status()
+        return r.json()
+
 
 @ui.page('/flask-search')
 async def flask_search(client: Client):
+
+    # # ---------------- Weight History Dialog ----------------
+    # history_dialog = ui.dialog()
+    # history_title = ui.label('')
+    # history_kv = ui.column().classes('gap-2')
+
+    # ---------------- Weight History Dialog ----------------
+    with ui.dialog() as history_dialog:
+        with ui.card().classes('w-[720px] max-w-[92vw] p-6 relative'):
+            with ui.row().classes('w-full items-center justify-between'):
+                history_title = ui.label('').classes('text-xl font-semibold')
+                ui.button('✕', on_click=history_dialog.close).props('flat').classes('text-gray-600 text-lg')
+            ui.separator().classes('my-4')
+            history_kv = ui.column().classes('gap-2')
+
+    # ---------------- Edit Bags Dialog ----------------
+    with ui.dialog() as edit_bags_dialog:
+        with ui.card().classes('w-[720px] max-w-[92vw] p-6 relative'):
+            with ui.row().classes('w-full items-center justify-between'):
+                edit_bags_title = ui.label('Edit Bags').classes('text-xl font-semibold')
+                ui.button('✕', on_click=edit_bags_dialog.close).props('flat').classes('text-gray-600 text-lg')
+
+            ui.separator().classes('my-4')
+
+            edit_bags_help = ui.label('').classes('text-sm text-gray-500 mb-2')
+            chips_wrap = ui.row().classes('w-full flex-wrap gap-2')
+
+            with ui.row().classes('w-full items-end gap-2 mt-3'):
+                new_bag_inp = ui.input('Add bag').props('dense clearable').classes('w-64')
+                # ui.button('ADD', on_click=lambda: None).props('outline dense')  # we’ll bind below
+                # ui.button('ADD', on_click=_add_bag).props('outline dense')
+                add_btn = ui.button('ADD').props('outline dense')
+
+
+
+            ui.separator().classes('my-4')
+
+            with ui.row().classes('w-full justify-end gap-2'):
+                ui.button('CANCEL', on_click=edit_bags_dialog.close).props('outline')
+                # save_bags_btn = ui.button('SAVE', on_click=lambda: None).props('color=primary')
+                save_bags_btn = ui.button('SAVE', on_click=lambda: asyncio.create_task(_save_bags())).props('color=primary')
+
+
+
     def notify(msg: str, color='primary'):
         with client:
             ui.notify(msg, color=color)
@@ -77,7 +154,14 @@ async def flask_search(client: Client):
     <style>
       .fill-parent{width:100%!important;max-width:100%!important}
       .fixed-table .q-table__container table{table-layout:fixed}
-      .chip-row{display:flex;gap:6px; overflow-x:auto; width:100%; padding:2px 0}
+      .chip-row{
+                     display:flex;
+                     flex-wrap: wrap;
+                     gap:6px; 
+                     overflow:visible; 
+                     width:100%; 
+                     padding:2px 0
+                }
     </style>
     ''')
 
@@ -96,7 +180,12 @@ async def flask_search(client: Client):
     # header like Trees
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
         ui.label('Flask Search').classes('text-lg font-semibold')
-        ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+        # ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+        with ui.row().classes('items-center gap-2'):
+            ui.button('← Inventory', on_click=lambda: ui.navigate.to('/dept/inventory')).props('flat').classes('text-white font-semibold')
+            ui.button('← Job Bag Supply', on_click=lambda: ui.navigate.to('/dept/job-bag')).props('flat').classes('text-white font-semibold')
+            ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+
 
     # preload metals
     try:
@@ -166,7 +255,7 @@ async def flask_search(client: Client):
                     {'name':'metal_name','label':'Metal','field':'metal_name','headerStyle':'width:180px','style':'width:180px'},
                     {'name':'flask_no','label':'Flask No','field':'flask_no','headerStyle':'width:120px','style':'width:120px'},
                     {'name':'tree_no','label':'Tree No','field':'tree_no','headerStyle':'width:200px','style':'width:200px'},
-                    {'name':'metal_weight','label':'Metal Wt','field':'metal_weight','headerStyle':'width:130px','style':'width:130px'},
+                    {'name':'metal_weight','label':'Req. Metal Weight','field':'metal_weight','headerStyle':'width:130px','style':'width:130px'},
                     # {'name':'bag_nos','label':'Bags','field':'bag_nos','headerStyle':'width:280px','style':'width:280px; overflow:hidden;'},
                     {'name':'bag_nos','label':'Bags','field':'bag_nos','headerStyle':'text-align:left;width:calc(100% - 830px)','style':'width:calc(100% - 830px);overflow:hidden;'},
                     {'name':'photo','label':'Photo','field':'photo_url','headerStyle':'width:90px','style':'width:90px'},
@@ -174,6 +263,8 @@ async def flask_search(client: Client):
                 table = ui.table(columns=columns, rows=[]) \
                           .props('dense flat bordered row-key="id" hide-bottom table-class="fixed-table" table-style="table-layout: fixed" table-header-style="text-align:left"') \
                           .classes('w-full text-sm sticky-headers')
+                
+
                 # table = ui.table(columns=columns, rows=[]) \
                 #     .props('dense flat bordered row-key="id" hide-bottom sticky-header') \
                 #     .style('max-height: 80vh;') \
@@ -224,6 +315,28 @@ async def flask_search(client: Client):
                 </q-td>
                 ''')
 
+                def on_row_click(e):
+                    # Quasar q-table emits row-click with args: (evt, row, index)
+                    # NiceGUI forwards those in e.args
+                    print("ROW CLICK raw args:", e.args)
+
+                    row = None
+                    if isinstance(e.args, list):
+                        # often: [evt, row, idx]
+                        for item in e.args:
+                            if isinstance(item, dict) and ('id' in item or 'kind' in item):
+                                row = item
+                                break
+
+                    if not row:
+                        notify('Could not read row from click event (see console).', 'negative')
+                        return
+
+                    asyncio.create_task(open_weight_history(row))
+
+                table.on('row-click', on_row_click)
+
+
 
     # ---------- data plumbing ----------
     def massage(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -249,6 +362,31 @@ async def flask_search(client: Client):
             rr.pop('_s_stage', None); rr.pop('_s_date', None); rr.pop('_s_metal', None); rr.pop('_s_flask', None)
         return out
 
+    def _fmt_num(v):
+        if v is None:
+            return '—'
+        try:
+            return f'{float(v):.2f}'
+        except Exception:
+            return str(v)
+
+    # def _kv(label: str, value: str):
+    #     with ui.row().classes('w-full justify-between'):
+    #         ui.label(label).classes('text-gray-600')
+    #         ui.label(value).classes('font-semibold')
+
+    def _kv(label: str, value: str, *, red: bool = False, bold: bool = False):
+        left_cls = 'text-gray-600'
+        right_cls = 'font-semibold' if bold else ''
+        if red:
+            left_cls += ' text-red-600'
+            right_cls += ' text-red-600'
+        with ui.row().classes('w-full justify-between'):
+            ui.label(label).classes(left_cls)
+            ui.label(value).classes(right_cls)
+
+
+
     def _row_matches_local_filters(row: dict, flask_no: str, tree_no: str, bag_no: str) -> bool:
         """Front-end filter fallback (case-insensitive contains)."""
         f = (flask_no or '').strip().lower()
@@ -268,6 +406,78 @@ async def flask_search(client: Client):
             if b not in text and all(b not in one for one in bags):
                 return False
         return True
+    
+    edit_state = {
+        'kind': None,          # 'flask' | 'tree'
+        'rid': None,           # int flask_id OR int tree_id
+        'row': None,           # original table row dict
+        'bags': [],            # editable list
+    }
+
+    def _render_edit_chips():
+        chips_wrap.clear()
+        with chips_wrap:
+            if not edit_state['bags']:
+                ui.label('No bags').classes('text-gray-400')
+                return
+            for b in edit_state['bags']:
+                with ui.row().classes('items-center gap-1'):
+                    ui.chip(b, color='primary', text_color='white').props('dense')
+                    ui.button('✕', on_click=lambda b=b: _remove_bag(b)) \
+                        .props('flat dense').classes('text-red-600')
+
+    def _remove_bag(b: str):
+        edit_state['bags'] = [x for x in edit_state['bags'] if x != b]
+        _render_edit_chips()
+
+    def _add_bag():
+        b = (new_bag_inp.value or '').strip()
+        if not b:
+            return
+        b = b.upper()
+        if b not in edit_state['bags']:
+            edit_state['bags'].append(b)
+        new_bag_inp.value = ''
+        _render_edit_chips()
+
+    add_btn.on('click', lambda e: _add_bag())
+
+
+    async def _save_bags():
+        try:
+            kind = edit_state['kind']
+            rid = edit_state['rid']
+            bags = edit_state['bags']
+
+            # print("SAVE BAGS kind=", kind, "rid=", rid, "bags=", bags)
+
+
+            if kind == 'tree':
+                await update_tree_bags(int(rid), bags)
+            else:
+                await update_flask_bags(int(rid), bags)
+
+            notify('Bags updated.', 'positive')
+            edit_bags_dialog.close()
+
+            # Refresh table + reopen history with updated bags
+            await refresh_table()
+            if edit_state['row']:
+                await open_weight_history(edit_state['row'])
+
+        except httpx.HTTPStatusError as e:
+            notify(explain_http_error(e), 'negative')
+        except Exception as e:
+            notify(f'Failed to save bags: {e}', 'negative')
+
+    # bind buttons
+    # replace the placeholder handlers above:
+    # - ADD button
+    # - SAVE button
+    # (NiceGUI lets us reassign on_click by creating new buttons, but simplest is use .on)
+    new_bag_inp.on('keydown.enter', lambda _e: _add_bag())
+    # Find the ADD button created above and bind it by recreating it if needed; easiest approach:
+
 
 
     async def refresh_table():
@@ -324,6 +534,243 @@ async def flask_search(client: Client):
         # massage + render
         table.rows = massage(rows)
         table.update()
+
+    # async def open_weight_history(row: Dict[str, Any]):
+    #     kind = row.get('kind')  # backend sends this (tree/flask)
+    #     rid = row.get('id')
+
+    #     try:
+    #         if kind == 'tree':
+    #             # id looks like "tree-12"
+    #             if isinstance(rid, str) and rid.startswith('tree-'):
+    #                 tree_id = int(rid.split('-', 1)[1])
+    #             else:
+    #                 notify('Invalid tree id', 'negative')
+    #                 return
+    #             data = await fetch_tree_weight_history(tree_id)
+    #             title_left = data.get('tree_no', 'Tree')
+    #         else:
+    #             # flask kind
+    #             flask_id = int(rid)
+    #             data = await fetch_weight_history(flask_id)
+    #             title_left = f"Flask {data.get('flask_no','—')}"
+
+    #     except httpx.HTTPStatusError as e:
+    #         notify(explain_http_error(e), 'negative')
+    #         return
+    #     except Exception as e:
+    #         notify(f'Failed to load history: {e}', 'negative')
+    #         return
+
+    #     # Title
+    #     history_title.text = f"{title_left} • {data.get('metal_name','—')}"
+
+    #     # Fill dialog
+    #     history_kv.clear()
+    #     with history_kv:
+
+    #         if data.get('est_metal_weight') is not None:
+    #             ui.separator().classes('my-2')
+    #             _kv('Estimated metal (Transit)', _fmt_num(data.get('est_metal_weight')))
+
+    #         _kv('Gasket weight', _fmt_num(data.get('gasket_weight')))
+    #         _kv('Total weight', _fmt_num(data.get('total_weight')))
+    #         _kv('Tree weight (Total − Gasket)', _fmt_num(data.get('tree_weight')))
+
+    #         ui.separator().classes('my-2')
+
+    #         _kv('Required / calculated metal weight', _fmt_num(data.get('required_metal_weight')))
+    #         _kv('Supplied weight', _fmt_num(data.get('supplied_weight')))
+    #         _kv('Casting in wt', _fmt_num(data.get('casting_in_weight')))
+    #         _kv('Casting out wt', _fmt_num(data.get('casting_out_weight')))
+
+    #         ui.separator().classes('my-2')
+
+    #         _kv('Cutting before wt', _fmt_num(data.get('cutting_before_weight')))
+    #         _kv('Cutting after usable wt', _fmt_num(data.get('cutting_after_usable_weight')))
+    #         _kv('Cutting after scrap wt', _fmt_num(data.get('cutting_after_scrap_weight')))
+
+    #         ui.separator().classes('my-2')
+
+    #         _kv('Loss in casting', _fmt_num(data.get('loss_in_casting')))
+    #         _kv('Loss in cutting', _fmt_num(data.get('loss_in_cutting')))
+    #         _kv('Total loss', _fmt_num(data.get('total_loss')))
+
+    #     history_dialog.open()
+
+    async def open_weight_history(row: Dict[str, Any]):
+        kind = row.get('kind')  # backend sends this (tree/flask)
+        rid = row.get('id')
+
+        try:
+            if kind == 'tree':
+                if isinstance(rid, str) and rid.startswith('tree-'):
+                    tree_id = int(rid.split('-', 1)[1])
+                else:
+                    notify('Invalid tree id', 'negative')
+                    return
+                data = await fetch_tree_weight_history(tree_id)
+                # title_mid = data.get('tree_no', 'Tree')
+                title_mid = f"Flask {data.get('flask_no', '—')}"
+            else:
+                flask_id = int(rid)
+                data = await fetch_weight_history(flask_id)
+                title_mid = f"Flask {data.get('flask_no','—')}"
+        except httpx.HTTPStatusError as e:
+            notify(explain_http_error(e), 'negative')
+            return
+        except Exception as e:
+            notify(f'Failed to load history: {e}', 'negative')
+            return
+
+        date_mmdd = to_mmdd(data.get('date') or '')
+        metal_name = data.get('metal_name') or '—'
+        stage_label = data.get('stage_label') or (data.get('stage') or '—')
+
+        # Title: date • flask/tree • metal
+        history_title.text = f"{date_mmdd} • {title_mid} • {metal_name}"
+
+        history_kv.clear()
+        with history_kv:
+            # stage line (small grey)
+            ui.label(stage_label).classes('text-sm text-gray-500')
+
+            # bag chips line
+            # bags = data.get('bag_nos') or []
+            # if bags:
+            #     with ui.row().classes('w-full flex-wrap gap-2 mt-2'):
+            #         for b in bags:
+            #             ui.chip(str(b), color='primary', text_color='white').props('dense')
+            # bag chips + edit button
+
+            bags = data.get('bag_nos') or []
+            with ui.row().classes('w-full items-start justify-between mt-2'):
+                with ui.row().classes('flex-wrap gap-2'):
+                    for b in bags:
+                        ui.chip(str(b), color='primary', text_color='white').props('dense')
+
+                # edit icon
+                ui.button(icon='edit', on_click=lambda: _open_edit_bags(kind, rid, row, bags)) \
+                    .props('flat round dense').classes('text-gray-600')
+
+            ui.separator().classes('my-4')
+
+            stage = data.get('stage') or ''
+            stage_idx = STAGE_ORDER.get(stage, 99)
+
+            # Transit trees: do not show any weight rows yet
+            if kind == 'tree' and stage == 'transit':
+                history_dialog.open()
+                return
+
+            def at_or_past(stage_slug: str) -> bool:
+                return stage_idx >= STAGE_ORDER.get(stage_slug, 99)
+
+            def has(v) -> bool:
+                return v is not None
+
+            # --- Transit tree special: show est metal if present ---
+            # if kind == 'tree' and has(data.get('est_metal_weight')):
+            #     _kv('Estimated metal (Transit)', _fmt_num(data.get('est_metal_weight')), bold=True)
+            #     return
+
+            # --- top weights (only show if recorded so far) ---
+            if has(data.get('gasket_weight')): _kv('Gasket weight', _fmt_num(data.get('gasket_weight')))
+            if has(data.get('total_weight')):  _kv('Total weight', _fmt_num(data.get('total_weight')))
+            if has(data.get('tree_weight')):   _kv('Tree weight (Total − Gasket)', _fmt_num(data.get('tree_weight')))
+
+            # required/supplied
+            if has(data.get('required_metal_weight')) or has(data.get('supplied_weight')):
+                ui.separator().classes('my-3')
+                if has(data.get('required_metal_weight')):
+                    _kv('Required / calculated metal weight', _fmt_num(data.get('required_metal_weight')), bold=True)
+                # if has(data.get('supplied_weight')):
+                #     _kv('Supplied weight', _fmt_num(data.get('supplied_weight')))
+                supplied_val = data.get('metal_supplied_weight', data.get('supplied_weight'))
+                if has(supplied_val):
+                    _kv('Supplied weight', _fmt_num(supplied_val))
+
+
+            # casting in/out + casting loss
+            if has(data.get('casting_in_weight')) or has(data.get('casting_out_weight')):
+                ui.separator().classes('my-3')
+                # if has(data.get('casting_in_weight')):
+                #     _kv('Casting in wt', _fmt_num(data.get('casting_in_weight')))
+                casting_in_val = data.get('casting_in_weight', data.get('casting_in'))
+                if has(casting_in_val):
+                    _kv('Casting in weight', _fmt_num(casting_in_val))
+
+                if has(data.get('casting_out_weight')):
+                    _kv('Casting out weight', _fmt_num(data.get('casting_out_weight')))
+                if has(data.get('loss_in_casting')):
+                    _kv('Casting loss', _fmt_num(data.get('loss_in_casting')), red=True, bold=True)
+
+            # cutting in/out + cutting loss
+            if has(data.get('cutting_before_weight')) or has(data.get('cutting_after_usable_weight')) or has(data.get('cutting_after_scrap_weight')):
+                ui.separator().classes('my-3')
+                if has(data.get('cutting_before_weight')):
+                    _kv('Cutting in weight', _fmt_num(data.get('cutting_before_weight')))
+                if has(data.get('cutting_after_usable_weight')):
+                    _kv('Cutting out weight (consumable)', _fmt_num(data.get('cutting_after_usable_weight')))
+                if has(data.get('cutting_after_scrap_weight')):
+                    _kv('Cutting out weight (scrap)', _fmt_num(data.get('cutting_after_scrap_weight')))
+                if has(data.get('loss_in_cutting')):
+                    _kv('Cutting loss', _fmt_num(data.get('loss_in_cutting')), red=True, bold=True)
+
+            # --- Transit loss (two legs + total) ---
+            # if has(data.get('transit_loss_mp_casting')) or has(data.get('transit_loss_casting_cutting')) or has(data.get('total_transit_loss')):
+            #     ui.separator().classes('my-3')
+            #     _kv('Transit loss (Metal Prep → Casting)', _fmt_num(data.get('transit_loss_mp_casting')))
+            #     _kv('Transit loss (Casting → Cutting)', _fmt_num(data.get('transit_loss_casting_cutting')))
+            #     _kv('Total transit loss', _fmt_num(data.get('total_transit_loss')), red=True, bold=True)
+
+            tl_mc = data.get('transit_loss_mp_casting')
+            tl_cc = data.get('transit_loss_casting_cutting')
+            tl_total = data.get('total_transit_loss')
+
+
+            show_tl_mc = at_or_past('casting_metal_in') and has(tl_mc)          # after casting metal in
+            show_tl_cc = at_or_past('cutting') and has(tl_cc)                  # after cutting
+            show_tl_total = show_tl_mc and has(tl_total)                       # show when first leg exists (as requested)
+
+            if show_tl_mc or show_tl_cc or show_tl_total:
+                ui.separator().classes('my-3')
+                if show_tl_mc:
+                    _kv('Transit loss (Metal Prep → Casting)', _fmt_num(tl_mc))
+                if show_tl_cc:
+                    _kv('Transit loss (Casting → Cutting)', _fmt_num(tl_cc))
+                if show_tl_total:
+                    _kv('Total transit loss', _fmt_num(tl_total), red=True, bold=True)
+
+            # total loss (bold red)
+            # if has(data.get('total_loss')):
+            #     ui.separator().classes('my-3')
+            #     _kv('Total loss', _fmt_num(data.get('total_loss')), red=True, bold=True)
+            ui.separator().classes('my-3')
+            _kv('Total loss', _fmt_num(data.get('total_loss')), red=True, bold=True)
+
+        history_dialog.open()
+
+    def _open_edit_bags(kind: str, rid: Any, row: Dict[str, Any], bags: List[str]):
+        edit_state['kind'] = kind
+        edit_state['row'] = row
+
+        if kind == 'tree':
+            # rid is like "tree-12"
+            if isinstance(rid, str) and rid.startswith('tree-'):
+                edit_state['rid'] = int(rid.split('-', 1)[1])
+            else:
+                notify('Invalid tree id', 'negative')
+                return
+            edit_bags_help.text = 'Editing bags for this TRANSIT TREE'
+        else:
+            edit_state['rid'] = int(rid)
+            edit_bags_help.text = 'Editing bags for this FLASK'
+
+        # copy list
+        edit_state['bags'] = list(bags or [])
+        _render_edit_chips()
+        edit_bags_dialog.open()
 
     # async def refresh_table():
     #     # build params explicitly; only include keys when they have values

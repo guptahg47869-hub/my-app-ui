@@ -74,11 +74,11 @@ def est_metal_weight(tree_weight: float, metal_name: str) -> float:
     return round((tree_weight or 0.0) * factor, 3)
 
 # --- snapshot for Metal Prep queue (bottom-left) ---
-async def fetch_metal_prep_queue(params: Dict[str, Any] | None = None):
-    async with httpx.AsyncClient(timeout=10.0) as c:
-        r = await c.get(f'{API_URL}/queue/metal_prep', params=params or None)
-        r.raise_for_status()
-        return r.json()
+# async def fetch_metal_prep_queue(params: Dict[str, Any] | None = None):
+#     async with httpx.AsyncClient(timeout=10.0) as c:
+#         r = await c.get(f'{API_URL}/queue/metal_prep', params=params or None)
+#         r.raise_for_status()
+#         return r.json()
 
 async def check_flask_unique(date_iso: str, flask_no: str):
     async with httpx.AsyncClient(timeout=10.0) as c:
@@ -90,6 +90,15 @@ async def check_flask_unique(date_iso: str, flask_no: str):
             # re-use your existing explainer for a nice message
             raise RuntimeError(explain_http_error(e)) from e
         return r.json()
+
+
+async def upload_tree_photo(tree_id: int, file_bytes: bytes, filename: str):
+    # sends multipart/form-data with field name "file"
+    files = {'file': (filename, file_bytes)}
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(f'{API_URL}/trees/{tree_id}/photo', files=files)
+        r.raise_for_status()
+        return r.json()  # {"photo_url": "..."} typically
 
 # ------------ SAME label generator as Metal Prep ------------
 def build_simple_label_pdf(*, flask_no: str, tree_no: str, metal_name: str,
@@ -134,7 +143,7 @@ def build_simple_label_pdf(*, flask_no: str, tree_no: str, metal_name: str,
     c.line(0, y, W, y); y -= 16
 
     c.setFont('Helvetica', 10)
-    c.drawString(M, y, 'Metal Weight:'); c.drawRightString(W-M, y, f'{required:.1f}'); y -= 16
+    c.drawString(M, y, 'Metal Weight:'); c.drawRightString(W-M, y, f'{required:.2f}'); y -= 16
 
     c.drawString(M, y, 'Casting Weight:'); c.line(M+80, y-1, W-M, y-1); y -= 16
     c.drawString(M, y, 'Cutting Weight:'); c.line(M+80, y-1, W-M, y-1); y -= 20
@@ -176,7 +185,10 @@ async def post_flask_page(client: Client):
         ui.label('Post Flask to Metal Prep').classes('text-lg font-semibold')
         with ui.row().classes('items-center gap-2'):
             # ui.button('CREATE TREE', on_click=lambda: ui.navigate.to('/trees')).props('flat').classes('text-white')
-            ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+            # ui.button(icon='home', on_click=lambda: ui.navigate.to('/')).props('flat round').classes('text-white')
+            ui.button('← Wax Room', on_click=lambda: ui.navigate.to('/dept/wax-room')).props('flat').classes('text-white font-semibold')
+            ui.button('← Casting Dept', on_click=lambda: ui.navigate.to('/dept/casting')).props('flat').classes('text-white font-semibold')
+
 
     selected: Dict[str, Any] | None = None
 
@@ -185,95 +197,225 @@ async def post_flask_page(client: Client):
         # LEFT: top transit, bottom metal prep snapshot (unchanged)
         with main_split.before:
             with ui.card().classes('w-full h-full p-0'):
-                inner = ui.splitter(value=60).props('horizontal').style('width:100%; height:100%')
+                # inner = ui.splitter(value=60).props('horizontal').style('width:100%; height:100%')
 
                 # TOP: transit
-                with inner.before:
-                    with ui.column().classes('w-full h-full').style('display:flex; flex-direction:column;'):
-                        today_iso = date.today().isoformat()
-                        with ui.row().classes('items-end gap-3 p-4').style('flex:0 0 auto;'):
-                            ui.label('Transit Queue').classes('text-base font-semibold mr-4')
-                            t_search = ui.input('Search by Tree No').props('clearable').classes('w-48')
-                            d_from = ui.input('From').props('type=date').classes('w-36')
-                            d_to   = ui.input('To').props('type=date').classes('w-36')
+                # with inner.before:
+                with ui.column().classes('w-full h-full').style('display:flex; flex-direction:column;'):
+                    today_iso = date.today().isoformat()
+                    with ui.row().classes('items-end gap-3 p-4').style('flex:0 0 auto;'):
+                        ui.label('Transit Queue').classes('text-base font-semibold mr-4')
+                        t_search = ui.input('Search by Tree No').props('clearable').classes('w-48')
+                        d_from = ui.input('From').props('type=date').classes('w-36')
+                        d_to   = ui.input('To').props('type=date').classes('w-36')
 
-                            try:
-                                async with httpx.AsyncClient(timeout=10) as c:
-                                    metals = (await c.get(f'{API_URL}/metals')).json()
-                                metal_options = ['All'] + sorted([m['name'] for m in metals if 'name' in m])
-                            except Exception:
-                                metal_options = ['All']
-                            metal_filter = ui.select(options=metal_options, value='All', label='Metal').classes('w-48')
-                            metal_filter.props('options-dense behavior=menu popup-content-style="z-index:4000"')
+                        try:
+                            async with httpx.AsyncClient(timeout=10) as c:
+                                metals = (await c.get(f'{API_URL}/metals')).json()
+                            metal_options = ['All'] + sorted([m['name'] for m in metals if 'name' in m])
+                        except Exception:
+                            metal_options = ['All']
+                        metal_filter = ui.select(options=metal_options, value='All', label='Metal').classes('w-48')
+                        metal_filter.props('options-dense behavior=menu popup-content-style="z-index:4000"')
 
-                            async def reset_filters():
-                                d_from.value = ''; d_to.value = ''
-                                t_search.value = ''; metal_filter.value = 'All'
-                                await refresh_transit_table()
-                                notify('Filters reset.', 'positive')
+                        async def reset_filters():
+                            d_from.value = ''; d_to.value = ''
+                            t_search.value = ''; metal_filter.value = 'All'
+                            await refresh_transit_table()
+                            notify('Filters reset.', 'positive')
 
-                            ui.button('RESET FILTERS', on_click=lambda: asyncio.create_task(reset_filters())).props('outline')
+                        ui.button('RESET FILTERS', on_click=lambda: asyncio.create_task(reset_filters())).props('outline')
 
-                        with ui.element('div').classes('fill-parent').style(
-                            'flex:1 1 auto; overflow:auto; padding:0 16px 16px 16px; width:100%; max-width:100%;'
-                        ):
-                            columns = [
-                                {'name': 'date', 'label': 'Date', 'field': 'date'},
-                                {'name': 'tree_no', 'label': 'Tree No', 'field': 'tree_no'},
-                                {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
-                                {'name': 'tree_weight', 'label': 'Tree Wt', 'field': 'tree_weight'},
-                                {'name': 'est_metal_weight', 'label': 'Est. Metal', 'field': 'est_metal_weight'},
-                            ]
-                            transit_table = ui.table(columns=columns, rows=[]) \
-                                              .props('dense flat bordered row-key="tree_id" selection="single" hide-bottom') \
-                                              .classes('w-full text-sm')
+                    with ui.element('div').classes('fill-parent').style(
+                        'flex:1 1 auto; overflow:auto; padding:0 16px 16px 16px; width:100%; max-width:100%;'
+                    ):
+                        columns = [
+                            {'name': 'date', 'label': 'Date', 'field': 'date'},
+                            {'name': 'tree_no', 'label': 'Tree No', 'field': 'tree_no'},
+                            {'name': 'flask_no', 'label': 'Flask No', 'field': 'flask_no'},
+                            {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
+                            # {'name': 'tree_weight', 'label': 'Tree Weight', 'field': 'tree_weight'},
+                            # {'name': 'est_metal_weight', 'label': 'Req. Metal Weight', 'field': 'est_metal_weight'},
+                        ]
+                        transit_table = ui.table(columns=columns, rows=[]) \
+                                            .props('dense flat bordered row-key="tree_id" selection="single" hide-bottom') \
+                                            .classes('w-full text-sm')
 
                 # BOTTOM: Metal Prep snapshot
-                with inner.after:
-                    with ui.column().classes('w-full h-full').style('display:flex; flex-direction:column;'):
-                        with ui.row().classes('items-center justify-between p-4').style('flex:0 0 auto;'):
-                            ui.label('Metal Prep Queue (snapshot)').classes('text-base font-semibold')
-                            ui.button('Refresh', on_click=lambda: asyncio.create_task(refresh_prep_table())).props('outline')
-                        with ui.element('div').classes('fill-parent').style(
-                            'flex:1 1 auto; overflow:auto; padding:0 16px 16px 16px; width:100%; max-width:100%;'
-                        ):
-                            prep_columns = [
-                                {'name': 'date', 'label': 'Date', 'field': 'date'},
-                                {'name': 'flask_no', 'label': 'Flask No', 'field': 'flask_no'},
-                                {'name': 'tree_no', 'label': 'Tree No', 'field': 'tree_no'},
-                                {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
-                                {'name': 'required_metal_weight', 'label': 'Req. Metal', 'field': 'required_metal_weight'},
-                            ]
-                            prep_table = ui.table(columns=prep_columns, rows=[]) \
-                                           .props('dense flat bordered hide-bottom') \
-                                           .classes('w-full text-sm')
+                # with inner.after:
+                #     with ui.column().classes('w-full h-full').style('display:flex; flex-direction:column;'):
+                #         with ui.row().classes('items-center justify-between p-4').style('flex:0 0 auto;'):
+                #             ui.label('Metal Prep Queue (snapshot)').classes('text-base font-semibold')
+                #             ui.button('Refresh', on_click=lambda: asyncio.create_task(refresh_prep_table())).props('outline')
+                #         with ui.element('div').classes('fill-parent').style(
+                #             'flex:1 1 auto; overflow:auto; padding:0 16px 16px 16px; width:100%; max-width:100%;'
+                #         ):
+                #             prep_columns = [
+                #                 {'name': 'date', 'label': 'Date', 'field': 'date'},
+                #                 {'name': 'flask_no', 'label': 'Flask No', 'field': 'flask_no'},
+                #                 {'name': 'tree_no', 'label': 'Tree No', 'field': 'tree_no'},
+                #                 {'name': 'metal_name', 'label': 'Metal', 'field': 'metal_name'},
+                #                 {'name': 'required_metal_weight', 'label': 'Req. Metal', 'field': 'required_metal_weight'},
+                #             ]
+                #             prep_table = ui.table(columns=prep_columns, rows=[]) \
+                #                            .props('dense flat bordered hide-bottom') \
+                #                            .classes('w-full text-sm')
 
         # RIGHT: posting + PRINT LABEL (button moved to top-right)
         with main_split.after:
-            with ui.card().classes('w-full h-full p-4'):
+            with ui.card().props('flat').classes('w-full h-full p-4 overflow-auto'):
+            # with ui.element('div').classes('w-full h-full').style('overflow:auto; padding:16px;'):
+
                 with ui.row().classes('items-center justify-between mb-2'):
                     ui.label('Post Flask to Metal Prep').classes('text-base font-semibold')
                     btn_print = ui.button('PRINT LABEL').classes('bg-indigo-600 text-white')
 
                 with ui.grid(columns=2).classes('gap-2 mb-2'):
                     ui.label('Tree No:');   tree_no_lbl = ui.label('—')
+                    ui.label('Flask No:');  flask_no_lbl = ui.label('—')
                     ui.label('Metal:');     metal_lbl   = ui.label('—')
-                    ui.label('Transit Est:'); est_lbl   = ui.label('—')
+
+                    # ui.label('Transit Est:'); est_lbl   = ui.label('—')
 
                 f_date = ui.input('Flask Date', value=date.today().isoformat()).props('type=date').classes('w-full')
-                f_no   = ui.input('Flask No').classes('w-full')
+                # f_no   = ui.input('Flask No').classes('w-full')
                 g_wt   = ui.number('Gasket Weight', value=0.0).classes('w-full')
                 t_wt   = ui.number('Total Weight',  value=0.0).classes('w-full')
                 tree_wt_lbl = ui.label('Tree Weight (Total − Gasket): —').classes('text-gray-600')
                 final_lbl   = ui.label('Final Metal (preview): —').classes('text-gray-600')
 
+                # ---------------- PHOTO UPLOAD (moved here from tree stage) ----------------
+                ui.separator().classes('my-3')
+                ui.label('Photo (optional)').classes('text-sm font-semibold')
+
+                # ui.separator().classes('my-2')
+                # ui.label('Photo (optional)').classes('text-gray-700')
+
+                # photo_bytes: bytes | None = None
+                # photo_name: str | None = None
+
+                photo_html = ui.html("""
+                <div id="photo-wrapper" style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+
+                    <label for="flask-photo" id="file-btn"
+                        style="
+                            background:#e0e0e0;
+                            padding:6px 14px;
+                            border-radius:6px;
+                            cursor:pointer;
+                            font-weight:bold;
+                            font-size:1rem;
+                        ">
+                        Choose File
+                    </label>
+
+                    <input id="flask-photo" type="file" accept="image/*" style="display:none;">
+
+                    <span id="file-name" style="color:#333; font-size:0.95rem;">No file chosen</span>
+
+                    <button id="clear-photo" type="button"
+                        style="
+                            background:#e0e0e0;
+                            padding:6px 12px;
+                            border-radius:6px;
+                            cursor:pointer;
+                            font-weight:bold;
+                            font-size:1rem;
+                        ">
+                        Clear Photo
+                    </button>
+                </div>
+
+                <img id="flask-photo-preview"
+                    style="display:none; margin-top:10px; width:96px; height:96px;
+                            object-fit:cover; border:1px solid #ccc; border-radius:6px;">
+                """)
+
+                with client:
+                    ui.run_javascript("""
+                    (function () {
+                        const input = document.getElementById('flask-photo');
+                        const clearBtn = document.getElementById('clear-photo');
+                        const img = document.getElementById('flask-photo-preview');
+                        const fileName = document.getElementById('file-name');
+
+                        function resetPreview() {
+                            img.style.display = 'none';
+                            img.src = '';
+                            clearBtn.disabled = true;
+                            fileName.textContent = 'No file chosen';
+                        }
+
+                        input.addEventListener('change', () => {
+                            if (!input.files || !input.files.length) {
+                                resetPreview();
+                                return;
+                            }
+                            const file = input.files[0];
+                            fileName.textContent = file.name;
+
+                            const reader = new FileReader();
+                            reader.onload = e => {
+                                img.src = e.target.result;
+                                img.style.display = 'block';
+                                clearBtn.disabled = false;
+                            };
+                            reader.readAsDataURL(file);
+                        });
+
+                        clearBtn.addEventListener('click', () => {
+                            input.value = '';
+                            resetPreview();
+                        });
+
+                        resetPreview();
+                    })();
+                    """)
+
+                # photo_preview = ui.html('')  # will show preview image
+                # photo_bytes: bytes | None = None
+                # photo_name: str | None = None
+
+                # def _render_photo_preview():
+                #     nonlocal photo_bytes, photo_name
+                #     if not photo_bytes:
+                #         photo_preview.content = '<div class="text-xs text-gray-500">No photo selected</div>'
+                #         return
+                #     import base64
+                #     b64 = base64.b64encode(photo_bytes).decode('ascii')
+                #     # best-effort type (png/jpg); browser will still render in most cases
+                #     photo_preview.content = f'''
+                #     <div class="text-xs text-gray-600 mb-1">Selected: {photo_name}</div>
+                #     <img src="data:image/*;base64,{b64}" style="max-width:100%; max-height:220px; border-radius:8px; border:1px solid #ddd;" />
+                #     '''
+
+                # def on_photo_selected(e):
+                #     # NiceGUI UploadEventArguments: e.name, e.content
+                #     nonlocal photo_bytes, photo_name
+                #     photo_bytes = e.content.read() if hasattr(e.content, 'read') else e.content
+                #     photo_name = e.name
+                #     _render_photo_preview()
+
+                # uploader = ui.upload(
+                #     label='Select photo',
+                #     auto_upload=True,
+                #     on_upload=on_photo_selected,
+                # ).props('accept="image/*" max-files=1').classes('w-full')
+
+                # btn_clear_photo = ui.button('Clear Photo', on_click=lambda: (
+                #     setattr(uploader, 'value', None),
+                # )).props('outline size=sm').classes('mt-2')
+
+                # _render_photo_preview()
+                # --------------------------------------------------------------------------
+
                 def refresh_preview():
                     try:
                         tw = float(t_wt.value or 0) - float(g_wt.value or 0)
-                        tree_wt_lbl.text = f'Tree Weight (Total − Gasket): {tw:.1f}'
+                        tree_wt_lbl.text = f'Tree Weight (Total − Gasket): {tw:.2f}'
                         mname = metal_lbl.text or ''
                         final = est_metal_weight(tw, mname)
-                        final_lbl.text = f'Final Metal (preview): {final:.1f}'
+                        final_lbl.text = f'Final Metal (preview): {final:.2f}'
                     except Exception:
                         tree_wt_lbl.text = 'Tree Weight (Total − Gasket): —'
                         final_lbl.text = 'Final Metal (preview): —'
@@ -282,26 +424,37 @@ async def post_flask_page(client: Client):
                 t_wt.on('change', lambda _e: refresh_preview())
 
                 async def sync_selection():
-                    nonlocal selected
+                    nonlocal selected # photo_bytes, photo_name
                     row_list = transit_table.selected or []
                     selected = row_list[0] if row_list else None
                     with client:
                         if not selected:
-                            tree_no_lbl.text = '—'; metal_lbl.text = '—'; est_lbl.text = '—'
-                            f_no.value = ''; g_wt.value = 0.0; t_wt.value = 0.0
+                            tree_no_lbl.text = '—'; metal_lbl.text = '—'; flask_no_lbl.text = '—'; # est_lbl.text = '—'
+                            # f_no.value = ''; 
+                            g_wt.value = 0.0; t_wt.value = 0.0
                             tree_wt_lbl.text = 'Tree Weight (Total − Gasket): —'
                             final_lbl.text   = 'Final Metal (preview): —'
+                            # clear photo state
+                            # nonlocal photo_bytes, photo_name
+                            # photo_bytes = None
+                            # photo_name = None
+                            # _render_photo_preview()
                         else:
                             tree_no_lbl.text = selected.get('tree_no','—')
                             metal_lbl.text   = selected.get('metal_name','—')
-                            est_lbl.text     = f"{selected.get('est_metal_weight','—')}"
+                            flask_no_lbl.text = selected.get('flask_no','—')
+                            # est_lbl.text     = f"{selected.get('est_metal_weight','—')}"
+                            # f_no.value = selected.get('flask_no') or ''
+                            # f_no.props('readonly')
                             g = selected.get('gasket_weight')
                             t = selected.get('total_weight')
                             tw = float(selected.get('tree_weight') or 0.0)
                             if g is None and t is None:
                                 g = 0.0; t = tw
-                            g_wt.value = float(g or 0.0)
-                            t_wt.value = float(t or 0.0)
+                            # g_wt.value = float(g or 0.0)
+                            # t_wt.value = float(t or 0.0)
+                            g_wt.value = 0.0
+                            t_wt.value = 0.0
                             refresh_preview()
 
                 transit_table.on('selection', lambda _e: asyncio.create_task(sync_selection()))
@@ -311,7 +464,7 @@ async def post_flask_page(client: Client):
                     nonlocal selected
                     if not selected:
                         notify('Select a tree first.', 'warning'); return
-                    flask_no = (f_no.value or '').strip()
+                    flask_no = (flask_no_lbl.text or '').strip()
                     if not flask_no:
                         notify('Enter a Flask No before printing.', 'warning'); return
                     # 1) VALIDATE without posting
@@ -325,7 +478,7 @@ async def post_flask_page(client: Client):
                         tw = float(t_wt.value or 0) - float(g_wt.value or 0)
                         required = est_metal_weight(tw, metal_lbl.text or '')
                         pdf_bytes = build_simple_label_pdf(
-                            flask_no=str((f_no.value or '').strip()),
+                            flask_no=str((flask_no_lbl.text or '').strip()),
                             tree_no=str(selected.get('tree_no') or ''),
                             metal_name=str(metal_lbl.text or ''),
                             date_iso=str(f_date.value or date.today().isoformat()),
@@ -359,13 +512,13 @@ async def post_flask_page(client: Client):
 
                 # POST to Metal Prep (unchanged)
                 async def do_post():
-                    nonlocal selected
+                    nonlocal selected # photo_bytes, photo_name
                     if not selected:
                         notify('Select a tree in transit first.', 'warning'); return
                     try:
                         payload = {
                             'tree_id': int(selected['tree_id']),
-                            'flask_no': (f_no.value or '').strip(),
+                            'flask_no': (flask_no_lbl.text or '').strip(),
                             'date': f_date.value,
                             'gasket_weight': float(g_wt.value or 0.0),
                             'total_weight': float(t_wt.value or 0.0),
@@ -379,12 +532,55 @@ async def post_flask_page(client: Client):
                     try:
                         _ = await post_flask(payload)
                         notify(f"Flask {payload['flask_no']} posted to Metal Prep.", 'positive')
+
+                        # upload photo (if selected)
+                        # if photo_bytes and photo_name:
+                        #     try:
+                        #         await upload_tree_photo(int(selected['tree_id']), photo_bytes, photo_name)
+                        #     except Exception as ex:
+                        #         notify(f'Photo upload failed: {ex}', 'warning')     
+
+                        tree_id = int(selected['tree_id'])
+
+                        js = f"""
+                        (async () => {{
+                        const input = document.getElementById('flask-photo');
+                        if (!input || !input.files || !input.files.length) {{
+                            console.log('No photo selected');
+                            return;
+                        }}
+
+                        const file = input.files[0];
+                        const form = new FormData();
+                        form.append('file', file);
+
+                        try {{
+                            const res = await fetch('{API_URL}/trees/{tree_id}/photo', {{
+                            method: 'POST',
+                            body: form
+                            }});
+
+                            if (!res.ok) {{
+                            const txt = await res.text();
+                            alert('Photo upload failed: ' + txt);
+                            }}
+                        }} catch (err) {{
+                            console.error('Photo upload error', err);
+                            alert('Photo upload error: ' + err);
+                        }}
+                        }})();
+                        """
+
+                        with client:
+                            ui.run_javascript(js)
+
                         with client:
                             transit_table.rows = [r for r in transit_table.rows if r['tree_id'] != selected['tree_id']]
                             transit_table.selected = []; transit_table.update()
-                        await refresh_prep_table()
+                        # await refresh_prep_table()
 
-                        f_no.value = ''; g_wt.value = 0.0; t_wt.value = 0.0
+                        g_wt.value = 0.0; t_wt.value = 0.0
+                        # photo_bytes = None; photo_name = None; _render_photo_preview()
                         refresh_preview()
                         await sync_selection()
                     except Exception as ex:
@@ -430,25 +626,25 @@ async def post_flask_page(client: Client):
                 rr.pop(k, None)
         return out
 
-    def _format_and_sort_prep(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
-        for r in rows:
-            d_iso = r.get('date') or ''
-            d = parse_iso_date(d_iso)
-            if not d:
-                continue
-            rr = dict(r)
-            rr['_sort_ord'] = -d.toordinal()
-            rr['_sort_metal'] = rr.get('metal_name') or ''
-            rr['_sort_flask'] = str(rr.get('flask_no',''))
-            rr['_display_date'] = to_ui_date(d_iso)
-            out.append(rr)
-        out.sort(key=lambda x: (x['_sort_ord'], x['_sort_metal'], x['_sort_flask']))
-        for rr in out:
-            rr['date'] = rr['_display_date']
-            for k in ('_sort_ord','_sort_metal','_sort_flask','_display_date'):
-                rr.pop(k, None)
-        return out
+    # def _format_and_sort_prep(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    #     out: List[Dict[str, Any]] = []
+    #     for r in rows:
+    #         d_iso = r.get('date') or ''
+    #         d = parse_iso_date(d_iso)
+    #         if not d:
+    #             continue
+    #         rr = dict(r)
+    #         rr['_sort_ord'] = -d.toordinal()
+    #         rr['_sort_metal'] = rr.get('metal_name') or ''
+    #         rr['_sort_flask'] = str(rr.get('flask_no',''))
+    #         rr['_display_date'] = to_ui_date(d_iso)
+    #         out.append(rr)
+    #     out.sort(key=lambda x: (x['_sort_ord'], x['_sort_metal'], x['_sort_flask']))
+    #     for rr in out:
+    #         rr['date'] = rr['_display_date']
+    #         for k in ('_sort_ord','_sort_metal','_sort_flask','_display_date'):
+    #             rr.pop(k, None)
+    #     return out
 
     async def refresh_transit_table():
         try:
@@ -464,15 +660,15 @@ async def post_flask_page(client: Client):
         transit_table.rows = rows
         transit_table.update()
 
-    async def refresh_prep_table():
-        try:
-            raw = await fetch_metal_prep_queue({})
-        except Exception as e:
-            notify(f'Failed to fetch metal prep queue: {e}', 'negative')
-            raw = []
-        rows = _format_and_sort_prep(raw)
-        prep_table.rows = rows
-        prep_table.update()
+    # async def refresh_prep_table():
+    #     try:
+    #         raw = await fetch_metal_prep_queue({})
+    #     except Exception as e:
+    #         notify(f'Failed to fetch metal prep queue: {e}', 'negative')
+    #         raw = []
+    #     rows = _format_and_sort_prep(raw)
+    #     prep_table.rows = rows
+    #     prep_table.update()
 
     metal_filter.on('update:model-value', lambda _v: asyncio.create_task(refresh_transit_table()))
     t_search.on('change', lambda _e: asyncio.create_task(refresh_transit_table()))
@@ -480,4 +676,4 @@ async def post_flask_page(client: Client):
     d_to.on('change',    lambda _e: asyncio.create_task(refresh_transit_table()))
 
     await asyncio.create_task(refresh_transit_table())
-    await asyncio.create_task(refresh_prep_table())
+    # await asyncio.create_task(refresh_prep_table())
