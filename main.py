@@ -38,7 +38,7 @@ if __name__ in {"__main__", "__mp_main__"}:
         title='Casting Tracker',
         host='0.0.0.0',
         port=PORT,
-        reload=True,   # prod on Render
+        reload=False,   # prod on Render
         show=False      # browser auto-open off
     )
 

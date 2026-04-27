@@ -105,15 +105,12 @@ async def post_prep(payload: Dict[str, Any]) -> Dict[str, Any]:
 def build_simple_label_pdf(*, flask_no: str, tree_no: str, metal_name: str,
                            date_iso: str, required: float) -> bytes:
     """
-    Skinny Code128; big date + 'FLASK: #'
+    2x3in, skinny Code128 barcode, big DATE and 'FLASK: N' at bottom.
     """
-    try:
-        from reportlab.pdfgen import canvas
-        from reportlab.lib.units import inch, mm
-        from reportlab.graphics.barcode import code128
-        from io import BytesIO
-    except ImportError:
-        raise RuntimeError('Missing dependency: reportlab (pip install reportlab)')
+    from io import BytesIO
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.units import inch, mm
+    from reportlab.graphics.barcode import code128
 
     W, H = (2 * inch, 3 * inch)
     M = 12
@@ -137,17 +134,20 @@ def build_simple_label_pdf(*, flask_no: str, tree_no: str, metal_name: str,
     c.setLineWidth(0.6)
     c.rect(1, 1, W-2, H-2)
 
-    y = H - M
-    c.setFont('Helvetica', 10)
-    c.drawString(M, y, 'Metal:')
-    c.drawRightString(W-M, y, (metal_name or '—')); y -= 14
-    c.drawString(M, y, 'Metal Weight:')
-    c.drawRightString(W-M, y, f'{required:.1f}'); y -= 16
+    y = H - M -10
+    c.setFont('Helvetica-Bold', 22)
+    # c.drawString(M, y, 'Metal:'); 
+    # c.drawRightString(W-M, y, (metal_name or '—'))
+    c.drawCentredString(W/2, y, f'{metal_name or "—"}')
+    y -= 8
+    c.setLineWidth(1)
+    c.line(0, y, W, y); y -= 16
 
-    c.drawString(M, y, 'Casting Weight:')
-    c.line(M+80, y-1, W-M, y-1); y -= 16
-    c.drawString(M, y, 'Cutting Weight:')
-    c.line(M+80, y-1, W-M, y-1); y -= 20
+    c.setFont('Helvetica', 10)
+    c.drawString(M, y, 'Metal Weight:'); c.drawRightString(W-M, y, f'{required:.1f}'); y -= 16
+
+    c.drawString(M, y, 'Casting Weight:'); c.line(M+80, y-1, W-M, y-1); y -= 16
+    c.drawString(M, y, 'Cutting Weight:'); c.line(M+80, y-1, W-M, y-1); y -= 20
 
     bar_width  = 0.8
     bar_height = 7 * mm
@@ -158,18 +158,20 @@ def build_simple_label_pdf(*, flask_no: str, tree_no: str, metal_name: str,
     y = by - 12
 
     c.setFont('Helvetica', 10)
-    c.drawString(M, y, 'Tree:')
-    c.drawRightString(W-M, y, (tree_no or '—')); y -= 8
+    c.drawString(M, y, 'Tree:'); c.drawRightString(W-M, y, (tree_no or '—')); y -= 8
 
-    c.setFont('Helvetica-Bold', 16)
+    c.setLineWidth(1)
+    c.line(0, y, W, y); y -= 8
+
+    c.setFont('Helvetica-Bold', 20)
     c.drawCentredString(W/2, M+38, disp_date)
-    c.setFont('Helvetica-Bold', 18)
+
+    c.setFont('Helvetica-Bold', 22)
     c.drawCentredString(W/2, M+18, f'FLASK: {flask_no}')
 
     c.showPage(); c.save()
-    out = buf.getvalue(); buf.close()
-    return out
-
+    return buf.getvalue()
+# ------------------------------------------------------------
 
 # ---------- page ----------
 @ui.page('/metal-prep')

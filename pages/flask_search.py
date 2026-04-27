@@ -81,6 +81,18 @@ async def flask_search(client: Client):
     </style>
     ''')
 
+    ui.add_head_html("""
+    <style>
+        .sticky-headers .q-table__container thead th {
+        position: sticky;
+        top: 0;
+        z-index: 5;               /* keep above rows */
+        background: #fff;         /* match table background */
+        }
+    </style>
+    """)
+
+
     # header like Trees
     with ui.header().classes('items-center justify-between bg-gray-900 text-white'):
         ui.label('Flask Search').classes('text-lg font-semibold')
@@ -156,11 +168,21 @@ async def flask_search(client: Client):
                     {'name':'tree_no','label':'Tree No','field':'tree_no','headerStyle':'width:200px','style':'width:200px'},
                     {'name':'metal_weight','label':'Metal Wt','field':'metal_weight','headerStyle':'width:130px','style':'width:130px'},
                     # {'name':'bag_nos','label':'Bags','field':'bag_nos','headerStyle':'width:280px','style':'width:280px; overflow:hidden;'},
-                    {'name':'bag_nos','label':'Bags','field':'bag_nos','headerStyle':'width:calc(100% - 830px)','style':'width:calc(100% - 830px);overflow:hidden;'}
+                    {'name':'bag_nos','label':'Bags','field':'bag_nos','headerStyle':'text-align:left;width:calc(100% - 830px)','style':'width:calc(100% - 830px);overflow:hidden;'},
+                    {'name':'photo','label':'Photo','field':'photo_url','headerStyle':'width:90px','style':'width:90px'},
                 ]
                 table = ui.table(columns=columns, rows=[]) \
-                          .props('dense flat bordered row-key="id" hide-bottom table-class="fixed-table" table-style="table-layout: fixed"') \
-                          .classes('w-full text-sm')
+                          .props('dense flat bordered row-key="id" hide-bottom table-class="fixed-table" table-style="table-layout: fixed" table-header-style="text-align:left"') \
+                          .classes('w-full text-sm sticky-headers')
+                # table = ui.table(columns=columns, rows=[]) \
+                #     .props('dense flat bordered row-key="id" hide-bottom sticky-header') \
+                #     .style('max-height: 80vh;') \
+                #     .classes('w-full text-sm')
+                # table = ui.table(columns=columns, rows=[]) \
+                #     .props('dense flat bordered row-key="id" hide-bottom sticky-header '
+                #         'virtual-scroll virtual-scroll-item-size=44') \
+                #     .style('height: 80vh;') \
+                #     .classes('w-full text-sm')
 
                 table.add_slot('body-cell-bag_nos', '''
                 <q-td :props="props">
@@ -175,6 +197,33 @@ async def flask_search(client: Client):
                   </div>
                 </q-td>
                 ''')
+
+                # table.add_slot('body-cell-photo', '''
+                # <q-td :props="props">
+                # <div v-if="props.row.photo_url" style="width:64px;height:64px;display:flex;align-items:center;justify-content:center;">
+                #     <img :src="props.row.photo_url"
+                #         alt="tree photo"
+                #         style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;"
+                #         @click="window.open(props.row.photo_url, '_blank')">
+                # </div>
+                # </q-td>
+                # ''')
+
+                table.add_slot('body-cell-photo', f'''
+                <q-td :props="props">
+                <div v-if="props.row.photo_url" style="width:64px;height:64px;display:flex;align-items:center;justify-content:center;">
+                    <a :href="(props.row.photo_url && props.row.photo_url[0]=='/' ? '{API_URL}'+props.row.photo_url : props.row.photo_url)"
+                    target="_blank" rel="noopener">
+                    <img
+                        :src="(props.row.photo_url && props.row.photo_url[0]=='/' ? '{API_URL}'+props.row.photo_url : props.row.photo_url)"
+                        alt="tree photo"
+                        style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;"
+                    >
+                    </a>
+                </div>
+                </q-td>
+                ''')
+
 
     # ---------- data plumbing ----------
     def massage(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

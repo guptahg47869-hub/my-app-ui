@@ -124,9 +124,16 @@ def build_simple_label_pdf(*, flask_no: str, tree_no: str, metal_name: str,
     c.setLineWidth(0.6)
     c.rect(1, 1, W-2, H-2)
 
-    y = H - M
+    y = H - M -10
+    c.setFont('Helvetica-Bold', 22)
+    # c.drawString(M, y, 'Metal:'); 
+    # c.drawRightString(W-M, y, (metal_name or '—'))
+    c.drawCentredString(W/2, y, f'{metal_name or "—"}')
+    y -= 8
+    c.setLineWidth(1)
+    c.line(0, y, W, y); y -= 16
+
     c.setFont('Helvetica', 10)
-    c.drawString(M, y, 'Metal:'); c.drawRightString(W-M, y, (metal_name or '—')); y -= 14
     c.drawString(M, y, 'Metal Weight:'); c.drawRightString(W-M, y, f'{required:.1f}'); y -= 16
 
     c.drawString(M, y, 'Casting Weight:'); c.line(M+80, y-1, W-M, y-1); y -= 16
@@ -143,10 +150,13 @@ def build_simple_label_pdf(*, flask_no: str, tree_no: str, metal_name: str,
     c.setFont('Helvetica', 10)
     c.drawString(M, y, 'Tree:'); c.drawRightString(W-M, y, (tree_no or '—')); y -= 8
 
-    c.setFont('Helvetica-Bold', 16)
+    c.setLineWidth(1)
+    c.line(0, y, W, y); y -= 8
+
+    c.setFont('Helvetica-Bold', 20)
     c.drawCentredString(W/2, M+38, disp_date)
 
-    c.setFont('Helvetica-Bold', 18)
+    c.setFont('Helvetica-Bold', 22)
     c.drawCentredString(W/2, M+18, f'FLASK: {flask_no}')
 
     c.showPage(); c.save()
