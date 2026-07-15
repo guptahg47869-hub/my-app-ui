@@ -339,16 +339,17 @@ async def post_flask_page(client: Client):
                         const img = document.getElementById('flask-photo-preview');
                         const fileName = document.getElementById('file-name');
 
-                        function resetPreview() {
+                        window.resetFlaskPhotoPicker = function () {
+                            input.value = '';
                             img.style.display = 'none';
                             img.src = '';
                             clearBtn.disabled = true;
                             fileName.textContent = 'No file chosen';
-                        }
+                        };
 
                         input.addEventListener('change', () => {
                             if (!input.files || !input.files.length) {
-                                resetPreview();
+                                window.resetFlaskPhotoPicker();
                                 return;
                             }
                             const file = input.files[0];
@@ -364,11 +365,10 @@ async def post_flask_page(client: Client):
                         });
 
                         clearBtn.addEventListener('click', () => {
-                            input.value = '';
-                            resetPreview();
+                            window.resetFlaskPhotoPicker();
                         });
 
-                        resetPreview();
+                        window.resetFlaskPhotoPicker();
                     })();
                     """)
 
@@ -563,6 +563,13 @@ async def post_flask_page(client: Client):
                             if (!res.ok) {{
                             const txt = await res.text();
                             alert('Photo upload failed: ' + txt);
+                            return;
+                            }}
+
+                            console.log('Photo uploaded successfully');
+
+                            if (window.resetFlaskPhotoPicker) {{
+                            window.resetFlaskPhotoPicker();
                             }}
                         }} catch (err) {{
                             console.error('Photo upload error', err);
